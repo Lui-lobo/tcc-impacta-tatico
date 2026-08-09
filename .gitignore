@@ -11,6 +11,10 @@ __pycache__/
 # Jupyter
 .ipynb_checkpoints/
 
+# PlatformIO
+.pio/
+.pytest_cache/
+
 # Editors / IDEs
 .vscode/
 .idea/

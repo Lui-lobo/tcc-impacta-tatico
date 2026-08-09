@@ -1,17 +1,7 @@
-// Arquivo gerado pelo Pipeline TinyML (TCC)
-#ifndef MODEL_TFLITE_H_
-#define MODEL_TFLITE_H_
+// Arquivo gerado automaticamente pelo Pipeline TinyML (TCC). Nao editar a mao.
+#include "model_tflite.h"
 
-#ifdef __has_attribute
-#define alignas(x) __attribute__((aligned(x)))
-#else
-#define alignas(x)
-#endif
-
-extern const unsigned char model_tflite[];
-extern const int model_tflite_len;
-
-const unsigned char model_tflite[] alignas(16) = {
+alignas(16) const unsigned char model_tflite[] = {
     0x20, 0x00, 0x00, 0x00, 0x54, 0x46, 0x4c, 0x33, 0x00, 0x00, 0x00, 0x00,
     0x14, 0x00, 0x20, 0x00, 0x1c, 0x00, 0x18, 0x00, 0x14, 0x00, 0x10, 0x00,
     0x0c, 0x00, 0x00, 0x00, 0x08, 0x00, 0x04, 0x00, 0x14, 0x00, 0x00, 0x00,
@@ -1391,6 +1381,4 @@ const unsigned char model_tflite[] alignas(16) = {
     0x46, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46
 };
 
-const int model_tflite_len = 16520;
-
-#endif // MODEL_TFLITE_H_
+const unsigned int model_tflite_len = 16520;

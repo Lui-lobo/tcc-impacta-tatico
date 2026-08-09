@@ -8,15 +8,19 @@ from src.pipeline.quantizer import ModelQuantizer
 from src.pipeline.c_generator import CArtifactGenerator
 from src.pipeline.evaluator import ModelEvaluator
 
+# Raiz do projeto PlatformIO que sobe o modelo para o ESP32.
+PIO_PROJECT_DIR = "arduino_deploy/tinyml_esp32"
+
+
 def load_datasets(base_dir="data", window_size=512):
     processor = DataProcessor(window_size=window_size)
     X_list = []
     y_list = []
-    
+
     # Lê as pastas do diretório data (ex: '0_normal', '1_inner_race')
     class_folders = sorted([f for f in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, f))])
     print(f"Pastas estruturais encontradas em '{base_dir}': {class_folders}")
-    
+
     for folder in class_folders:
         try:
             class_label = int(folder.split('_')[0]) # Extrai o '0' de '0_normal'
@@ -39,7 +43,7 @@ def load_datasets(base_dir="data", window_size=512):
         
     X_all = np.vstack(X_list).astype(np.float32)
     y_all = np.concatenate(y_list)
-    return X_all, y_all, len(class_folders)
+    return X_all, y_all, class_folders
 
 def main():
     print("========================================")
@@ -49,8 +53,9 @@ def main():
     window_size = 512
     
     print("[1/5] Carregando datasets estruturados...")
-    X_all, y_all, num_classes = load_datasets(base_dir="data", window_size=window_size)
-    
+    X_all, y_all, class_folders = load_datasets(base_dir="data", window_size=window_size)
+    num_classes = len(class_folders)
+
     # Separa 20% dos dados para validação real e balanceada (stratify)
     X_train, X_test, y_train, y_test = train_test_split(X_all, y_all, test_size=0.2, random_state=42, stratify=y_all)
     
@@ -69,21 +74,35 @@ def main():
     history = model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=1, validation_data=(X_test, y_test))
     
     print("\n[3/5] Quantizando (Float32 -> Int8)...")
-    tflite_path = "arduino_deploy/tinyml_esp32/model_quantized.tflite"
+    tflite_path = os.path.join(PIO_PROJECT_DIR, "model_quantized.tflite")
     quantizer = ModelQuantizer(keras_model=model, representative_dataset=X_train)
     quantizer.quantize_to_int8(output_path=tflite_path)
-    
-    print("\n[4/5] Convertendo para artefato da linguagem C...")
-    c_header_path = "arduino_deploy/tinyml_esp32/model_tflite.h"
-    CArtifactGenerator.tflite_to_c_array(tflite_path, c_header_path)
-    
+
+    print("\n[4/5] Convertendo para artefatos da linguagem C (projeto PlatformIO)...")
+    c_header_path = os.path.join(PIO_PROJECT_DIR, "include", "model_tflite.h")
+    c_source_path = os.path.join(PIO_PROJECT_DIR, "src", "model_tflite.cpp")
+    params_path = os.path.join(PIO_PROJECT_DIR, "include", "model_params.h")
+
+    CArtifactGenerator.tflite_to_c_array(tflite_path, c_header_path, c_source_path)
+    # O firmware precisa da mesma normalização do treino para inferir corretamente.
+    CArtifactGenerator.generate_params_header(
+        params_path,
+        window_size=window_size,
+        num_classes=num_classes,
+        norm_mean=float(mean),
+        norm_std=float(std),
+        class_labels=class_folders,
+    )
+
     print("\n[5/5] Executando Inferências Finais e Medindo Hardware...")
     report_path = "relatorios/relatorio_metricas.md"
     ModelEvaluator.generate_metrics_report(model, history, X_test, y_test, tflite_path, report_path)
     
     print("\n========================================")
     print("[SUCESSO] Pipeline Finalizado!")
-    print(f"O Arquivo header foi gerado em: {c_header_path}")
+    print(f"Modelo em C:    {c_source_path}")
+    print(f"Parametros:     {params_path}")
+    print(f"Para gravar:    cd {PIO_PROJECT_DIR} && pio run -t upload")
     print("========================================")
 
 if __name__ == "__main__":
