@@ -1,7 +1,18 @@
 import os
 from typing import List
 
+import numpy as np
+
 _HEADER_NOTICE = "// Arquivo gerado automaticamente pelo Pipeline TinyML (TCC). Nao editar a mao."
+
+
+def _c_array_body(values, per_line: int, formatter) -> str:
+    """Formata uma sequencia numerica como corpo de inicializador C."""
+    lines = []
+    for i in range(0, len(values), per_line):
+        chunk = values[i:i + per_line]
+        lines.append("    " + ", ".join(formatter(v) for v in chunk))
+    return ",\n".join(lines)
 
 
 class CArtifactGenerator:
@@ -84,6 +95,101 @@ static const char* const kClassLabels[kNumClasses] = {{{labels}}};
 #endif  // MODEL_PARAMS_H_
 """
         CArtifactGenerator._write(output_path, code)
+
+    @staticmethod
+    def generate_test_vectors(header_path: str, source_path: str,
+                              windows_i16: np.ndarray, labels: np.ndarray,
+                              reference_output: np.ndarray,
+                              input_hash: np.ndarray, scale: float,
+                              sample_rate_hz: int) -> None:
+        """Grava o conjunto de teste do CWRU na flash do ESP32.
+
+        Serve para validar o caminho de inferencia embarcado sem bancada
+        rotativa: as mesmas janelas que produziram a acuracia do relatorio sao
+        reprocessadas dentro do microcontrolador, e o resultado e comparado com
+        a saida do interpretador TFLite de referencia (o do PC).
+
+        As janelas viajam em int16 e nao em float32. Sao ~15 bits uteis contra
+        os 8 bits que o quantizador de entrada preserva, entao a conversao nao
+        perde nada que o modelo pudesse enxergar - e custa metade da flash.
+        Alem disso, int16 e exatamente o formato que o MPU6050 entrega, o que
+        mantem o vetor de teste no mesmo domicilio numerico do sinal real.
+
+        `reference_output` guarda o tensor de saida int8 completo, e nao apenas
+        a classe vencedora. Comparar os bytes permite afirmar identidade
+        aritmetica entre PC e ESP32, uma alegacao bem mais forte do que
+        concordancia de argmax.
+        """
+        n_vectors, window = windows_i16.shape
+        n_classes = reference_output.shape[1]
+
+        guard = "TEST_VECTORS_H_"
+        header_code = f"""{_HEADER_NOTICE}
+#ifndef {guard}
+#define {guard}
+
+#include <stdint.h>
+
+// Janelas do conjunto de TESTE (nunca vistas no treino), decimadas para
+// {sample_rate_hz} Hz e armazenadas na flash para validacao embarcada.
+constexpr int kNumTestVectors = {n_vectors};
+constexpr int kTestVectorWindow = {window};
+constexpr int kTestVectorClasses = {n_classes};
+constexpr int kTestVectorSampleRateHz = {sample_rate_hz};
+
+// Reconstrucao do valor fisico: g = kTestVectorData[i] * kTestVectorScale.
+constexpr float kTestVectorScale = {float(scale):.9e}f;
+
+// {n_vectors} x {window} amostras, em ordem [vetor][amostra].
+extern const int16_t kTestVectorData[];
+
+// Classe verdadeira de cada janela (indice em kClassLabels).
+extern const uint8_t kTestVectorLabel[];
+
+// Tensor de saida int8 produzido pelo interpretador TFLite no PC, para as
+// MESMAS janelas. Referencia de comparacao bit a bit.
+extern const int8_t kTestVectorRefOutput[];
+
+// Hash FNV-1a de 32 bits da janela JA quantizada em int8 no PC. Permite ao
+// ESP32 provar que montou exatamente a mesma entrada, separando um erro de
+// pre-processamento de uma diferenca entre os kernels do TFLite Micro e os do
+// TFLite de desktop.
+extern const uint32_t kTestVectorInputHash[];
+
+#endif  // {guard}
+"""
+
+        data_body = _c_array_body(
+            windows_i16.reshape(-1).tolist(), 16, lambda v: f"{v:6d}")
+        label_body = _c_array_body(
+            labels.reshape(-1).tolist(), 32, lambda v: f"{v}")
+        ref_body = _c_array_body(
+            reference_output.reshape(-1).tolist(), 24, lambda v: f"{v:4d}")
+        hash_body = _c_array_body(
+            input_hash.reshape(-1).tolist(), 6, lambda v: f"0x{v:08x}u")
+
+        source_code = f"""{_HEADER_NOTICE}
+#include "test_vectors.h"
+
+const int16_t kTestVectorData[kNumTestVectors * kTestVectorWindow] = {{
+{data_body}
+}};
+
+const uint8_t kTestVectorLabel[kNumTestVectors] = {{
+{label_body}
+}};
+
+const int8_t kTestVectorRefOutput[kNumTestVectors * kTestVectorClasses] = {{
+{ref_body}
+}};
+
+const uint32_t kTestVectorInputHash[kNumTestVectors] = {{
+{hash_body}
+}};
+"""
+
+        CArtifactGenerator._write(header_path, header_code)
+        CArtifactGenerator._write(source_path, source_code)
 
     @staticmethod
     def _write(path: str, content: str) -> None:

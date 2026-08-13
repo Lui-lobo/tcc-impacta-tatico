@@ -33,6 +33,16 @@
 #include "model_params.h"
 #include "model_tflite.h"
 
+// Conjunto de teste do CWRU gravado na flash pelo build.py (etapa 5). O
+// __has_include mantem o firmware compilavel num checkout limpo, antes de o
+// pipeline Python ter rodado pela primeira vez.
+#if __has_include("test_vectors.h")
+#include "test_vectors.h"
+#define HAS_TEST_VECTORS 1
+#else
+#define HAS_TEST_VECTORS 0
+#endif
+
 #include <Wire.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
@@ -470,6 +480,299 @@ static float buildInputSignal() {
 }
 
 // ===========================================================================
+// Normalizacao e quantizacao da entrada
+// ===========================================================================
+
+// Metricas da conversao float -> int8 de uma janela.
+struct QuantStats {
+  int8_t min;
+  int8_t max;
+  uint32_t clipped;      // amostras que bateram em -128/+127
+  int distinct_levels;   // quantos dos 256 niveis foram usados
+};
+
+// Normaliza accel_buffer com as constantes do treino e escreve o tensor de
+// entrada do modelo.
+//
+// Esta funcao e chamada tanto pelo laco principal quanto pela suite de
+// validacao embarcada. Manter uma implementacao unica e o que garante que o
+// teste com o dataset percorra exatamente o mesmo codigo da operacao real - se
+// fossem duas copias, a validacao poderia passar num caminho que nao e o que
+// roda em campo.
+static QuantStats quantizeInputWindow() {
+  QuantStats qs;
+  qs.min = 127;
+  qs.max = -128;
+  qs.clipped = 0;
+
+  const float scale = model_input->params.scale;
+  const int zero_point = model_input->params.zero_point;
+  uint8_t level_seen[32] = {0};  // bitmap dos 256 niveis int8 usados
+
+  for (int i = 0; i < kWindowSize; i++) {
+    const float normalized = (accel_buffer[i] - kNormMean) / (kNormStd + 1e-8f);
+    int32_t quantized = (int32_t)lroundf(normalized / scale) + zero_point;
+    if (quantized < -128 || quantized > 127) {
+      qs.clipped++;
+      quantized = constrain(quantized, -128, 127);
+    }
+    const int8_t q = (int8_t)quantized;
+    model_input->data.int8[i] = q;
+    if (q < qs.min) qs.min = q;
+    if (q > qs.max) qs.max = q;
+    const uint8_t idx = (uint8_t)((int)q + 128);
+    level_seen[idx >> 3] |= (uint8_t)(1u << (idx & 7));
+  }
+
+  qs.distinct_levels = 0;
+  for (int b = 0; b < 32; b++) {
+    uint8_t v = level_seen[b];
+    while (v) {
+      qs.distinct_levels += (v & 1);
+      v >>= 1;
+    }
+  }
+  return qs;
+}
+
+// ===========================================================================
+// Validacao embarcada com o conjunto de teste do CWRU
+// ===========================================================================
+// Sem uma bancada com eixo girando nao ha como excitar as assinaturas de falha
+// de rolamento (BPFI ~162 Hz, BPFO ~107 Hz a 1797 rpm) na mesa. Esta suite
+// resolve a outra metade do problema: prova que o caminho de inferencia
+// embarcado reproduz o do PC, usando as MESMAS janelas de teste que geraram a
+// acuracia do relatorio.
+//
+// O que ela valida: normalizacao em float32, quantizacao int8, aritmetica do
+// TFLite Micro no Xtensa, tempo de inferencia real e uso da arena.
+// O que ela NAO valida: a aquisicao pelo MPU6050 (o sinal vem da flash) nem a
+// generalizacao do modelo para um rolamento fisico.
+
+#if HAS_TEST_VECTORS
+
+static_assert(kTestVectorWindow == kWindowSize,
+              "test_vectors.h e model_params.h divergem no tamanho da janela. "
+              "Regenere ambos com 'python build.py'.");
+static_assert(kTestVectorClasses == kNumClasses,
+              "test_vectors.h e model_params.h divergem no numero de classes. "
+              "Regenere ambos com 'python build.py'.");
+
+// FNV-1a de 32 bits, o mesmo algoritmo do fnv1a32() no build.py. Compara a
+// janela quantizada montada aqui com a que o PC usou, sem gastar 512 bytes por
+// vetor guardando a entrada int8 inteira.
+static uint32_t fnv1a32(const int8_t* data, int n) {
+  uint32_t h = 2166136261u;
+  for (int i = 0; i < n; i++) {
+    h ^= (uint32_t)(uint8_t)data[i];
+    h *= 16777619u;
+  }
+  return h;
+}
+
+static void runTestVectorSuite() {
+  if (interpreter == nullptr) {
+    Serial.println("ERRO: interpretador nao inicializado.");
+    return;
+  }
+
+  Serial.println();
+  Serial.println("========== VALIDACAO EMBARCADA - CONJUNTO DE TESTE ==========");
+  Serial.printf("Janelas gravadas na flash: %d | fs de origem: %d Hz\n",
+                kNumTestVectors, kTestVectorSampleRateHz);
+  Serial.printf("Escala do vetor: %.6e g/LSB | eixo: dataset CWRU (nao o sensor)\n",
+                kTestVectorScale);
+  Serial.println("A remocao de DC fica DESLIGADA aqui: o CWRU ja e um sinal AC,");
+  Serial.println("e no laco principal ela existe so para descontar a gravidade.");
+  Serial.println();
+  Serial.println("  idx  verd   pc  esp32     conf   dev      us");
+
+  static uint16_t confusion[kNumClasses][kNumClasses];
+  memset(confusion, 0, sizeof(confusion));
+
+  uint32_t correct = 0;      // acertou a classe verdadeira
+  uint32_t agree_class = 0;  // mesmo argmax que o interpretador do PC
+  uint32_t agree_exact = 0;  // tensor de saida identico byte a byte
+  uint32_t failures = 0;     // Invoke() retornou erro
+  uint32_t input_match = 0;  // entrada int8 identica a montada no PC
+  int max_deviation = 0;     // maior diferenca, em LSB, contra a referencia
+
+  // Quando a softmax satura (int8 = 127, ou seja, confianca de 0.9961), o
+  // resultado e o mesmo dos dois lados INDEPENDENTEMENTE do que aconteceu na
+  // aritmetica interna: qualquer diferenca e ceifada pelo teto do int8. Contar
+  // essas janelas a parte impede que elas inflem a taxa de igualdade exata.
+  uint32_t saturated_out = 0;
+  uint32_t unsat_total = 0;
+  uint32_t unsat_exact = 0;
+  uint32_t t_min = 0xFFFFFFFFUL;
+  uint32_t t_max = 0;
+  uint64_t t_sum = 0;
+
+  const float out_scale = model_output->params.scale;
+  const int out_zero_point = model_output->params.zero_point;
+
+  for (int v = 0; v < kNumTestVectors; v++) {
+    const int16_t* src = &kTestVectorData[(size_t)v * kTestVectorWindow];
+    for (int i = 0; i < kWindowSize; i++) {
+      accel_buffer[i] = (float)src[i] * kTestVectorScale;
+    }
+
+    quantizeInputWindow();
+
+    if (fnv1a32(model_input->data.int8, kWindowSize) ==
+        kTestVectorInputHash[v]) {
+      input_match++;
+    }
+
+    const uint32_t t0 = micros();
+    if (interpreter->Invoke() != kTfLiteOk) {
+      Serial.printf("  #%03d  Invoke() FALHOU\n", v);
+      failures++;
+      continue;
+    }
+    const uint32_t dt = micros() - t0;
+
+    if (dt < t_min) t_min = dt;
+    if (dt > t_max) t_max = dt;
+    t_sum += dt;
+
+    const int8_t* ref = &kTestVectorRefOutput[(size_t)v * kNumClasses];
+    int esp_best = 0;
+    int ref_best = 0;
+    int deviation = 0;
+    for (int c = 0; c < kNumClasses; c++) {
+      const int8_t got = model_output->data.int8[c];
+      if (got > model_output->data.int8[esp_best]) esp_best = c;
+      if (ref[c] > ref[ref_best]) ref_best = c;
+      const int d = abs((int)got - (int)ref[c]);
+      if (d > deviation) deviation = d;
+    }
+    if (deviation > max_deviation) max_deviation = deviation;
+    if (deviation == 0) agree_exact++;
+    if (esp_best == ref_best) agree_class++;
+
+    if (model_output->data.int8[esp_best] == 127) {
+      saturated_out++;
+    } else {
+      unsat_total++;
+      if (deviation == 0) unsat_exact++;
+    }
+
+    const int truth = (int)kTestVectorLabel[v];
+    if (truth >= 0 && truth < kNumClasses) {
+      confusion[truth][esp_best]++;
+      if (esp_best == truth) correct++;
+    }
+
+    const float conf =
+        (model_output->data.int8[esp_best] - out_zero_point) * out_scale;
+
+    const char* mark = (esp_best != ref_best) ? "  DIVERGE-PC"
+                       : (esp_best != truth)  ? "  ERRO"
+                                              : "";
+    Serial.printf("  #%03d    %d    %d      %d   %.4f   %3d  %6lu%s\n", v, truth,
+                  ref_best, esp_best, conf, deviation, (unsigned long)dt, mark);
+
+    // 512 amostras + inferencia por iteracao; cede a CPU para o watchdog.
+    yield();
+  }
+
+  const uint32_t evaluated = (uint32_t)kNumTestVectors - failures;
+  if (evaluated == 0) {
+    Serial.println("Nenhuma janela pode ser avaliada.");
+    return;
+  }
+
+  Serial.println();
+  Serial.println("--- Matriz de confusao (linha = verdade, coluna = predito) ---");
+  Serial.printf("%-16s", "");
+  for (int c = 0; c < kNumClasses; c++) {
+    Serial.printf("%8.8s", kClassLabels[c]);
+  }
+  Serial.println("   recall");
+  for (int r = 0; r < kNumClasses; r++) {
+    Serial.printf("%-16.16s", kClassLabels[r]);
+    uint32_t row_total = 0;
+    for (int c = 0; c < kNumClasses; c++) {
+      Serial.printf("%8u", confusion[r][c]);
+      row_total += confusion[r][c];
+    }
+    if (row_total > 0) {
+      Serial.printf("   %6.2f%%\n", 100.0f * confusion[r][r] / row_total);
+    } else {
+      Serial.println("      n/d");
+    }
+  }
+
+  Serial.println();
+  // Vem primeiro porque separa as duas causas possiveis de divergencia: se a
+  // entrada bate, o pre-processamento esta provado correto e o que sobra e
+  // diferenca entre os kernels do TFLM e os do TFLite.
+  Serial.printf("Entrada int8 identica ao PC:   %6.2f%%  (%lu/%d)\n",
+                100.0f * input_match / kNumTestVectors,
+                (unsigned long)input_match, kNumTestVectors);
+  Serial.printf("Acuracia no ESP32:             %6.2f%%  (%lu/%lu)\n",
+                100.0f * correct / evaluated, (unsigned long)correct,
+                (unsigned long)evaluated);
+  Serial.printf("Mesma classe que o PC:         %6.2f%%  (%lu/%lu)\n",
+                100.0f * agree_class / evaluated, (unsigned long)agree_class,
+                (unsigned long)evaluated);
+  Serial.printf("Saida int8 identica ao PC:     %6.2f%%  (%lu/%lu) | "
+                "desvio max = %d LSB\n",
+                100.0f * agree_exact / evaluated, (unsigned long)agree_exact,
+                (unsigned long)evaluated, max_deviation);
+  Serial.printf("  ... descontando as saturadas: %6.2f%%  (%lu/%lu)\n",
+                unsat_total ? 100.0f * unsat_exact / unsat_total : 0.0f,
+                (unsigned long)unsat_exact, (unsigned long)unsat_total);
+  Serial.printf("Saidas saturadas (int8=127):   %6.2f%%  (%lu/%lu) - nestas a "
+                "igualdade e trivial\n",
+                100.0f * saturated_out / evaluated,
+                (unsigned long)saturated_out, (unsigned long)evaluated);
+  if (failures > 0) {
+    Serial.printf("Invoke() falhou em %lu janelas.\n", (unsigned long)failures);
+  }
+
+  const uint32_t t_avg = (uint32_t)(t_sum / evaluated);
+  Serial.printf("Inferencia:                    min=%lu us  medio=%lu us  "
+                "max=%lu us\n",
+                (unsigned long)t_min, (unsigned long)t_avg,
+                (unsigned long)t_max);
+  // Ciclo util = tempo de inferencia / duracao da janela. Mostra quanta folga
+  // sobra para amostrar continuamente sem perder janelas.
+  const float window_ms = 1000.0f * kWindowSize / kTrainingSampleRateHz;
+  Serial.printf("Vazao maxima:                  %.1f janelas/s "
+                "(janela de %.0f ms => ciclo util de %.2f%%)\n",
+                t_avg ? 1000000.0f / t_avg : 0.0f, window_ms,
+                100.0f * (t_avg / 1000.0f) / window_ms);
+  Serial.printf("Arena utilizada:               %u de %d bytes\n",
+                (unsigned)interpreter->arena_used_bytes(), kTensorArenaSize);
+
+  Serial.println();
+  Serial.println("Leitura do resultado:");
+  Serial.println("  - A metrica que decide o deploy e 'mesma classe que o PC'.");
+  Serial.println("    E ela que diz se o embarcado toma as mesmas decisoes.");
+  Serial.println("  - Desvio em LSB cresce onde a confianca e baixa: a softmax");
+  Serial.println("    amplifica diferencas de 1-2 LSB nos logitos quando as");
+  Serial.println("    classes estao empatadas. Divergencia grande com confianca");
+  Serial.println("    alta seria o sinal preocupante - o contrario e esperado.");
+  Serial.println("  - A referencia gravada usa os kernels BUILTIN_REF do TFLite,");
+  Serial.println("    que sao os que o TFLite Micro implementa. Comparar contra");
+  Serial.println("    os kernels otimizados de desktop mediria a diferenca entre");
+  Serial.println("    duas implementacoes, nao a fidelidade deste deploy.");
+  Serial.println("=============================================================");
+  Serial.println();
+}
+
+#else  // HAS_TEST_VECTORS
+
+static void runTestVectorSuite() {
+  Serial.println("Conjunto de teste ausente. Rode 'python build.py' para gerar "
+                 "include/test_vectors.h e src/test_vectors.cpp.");
+}
+
+#endif  // HAS_TEST_VECTORS
+
+// ===========================================================================
 // Console serial
 // ===========================================================================
 
@@ -493,6 +796,12 @@ static void printHelp() {
   Serial.println("  f  alterna fs: 250 -> 500 -> 1000 -> 2000 Hz");
   Serial.println("  r  despeja a janela atual em CSV (para FFT no Python)");
   Serial.println("  p  pausa/retoma a inferencia");
+#if HAS_TEST_VECTORS
+  Serial.printf("  t  valida o deploy com as %d janelas de teste do CWRU\n",
+                kNumTestVectors);
+#else
+  Serial.println("  t  validacao com o conjunto de teste (nao gerado ainda)");
+#endif
   Serial.println("-------------------------------");
   Serial.println();
 }
@@ -543,6 +852,7 @@ static void handleSerialCommand() {
         break;
       }
       case 'r': dumpWindowCsv(); break;
+      case 't': runTestVectorSuite(); break;
       case 'p':
         g_paused = !g_paused;
         Serial.printf("[CFG] inferencia: %s\n", g_paused ? "PAUSADA" : "ATIVA");
@@ -726,37 +1036,7 @@ void loop() {
   const float signal_std = buildInputSignal();
 
   // ---- 3. Normalizacao + quantizacao -------------------------------------
-  const float scale = model_input->params.scale;
-  const int zero_point = model_input->params.zero_point;
-
-  int8_t q_min = 127;
-  int8_t q_max = -128;
-  uint32_t q_clipped = 0;
-  uint8_t level_seen[32] = {0};  // bitmap dos 256 niveis int8 usados
-
-  for (int i = 0; i < kWindowSize; i++) {
-    const float normalized = (accel_buffer[i] - kNormMean) / (kNormStd + 1e-8f);
-    int32_t quantized = (int32_t)lroundf(normalized / scale) + zero_point;
-    if (quantized < -128 || quantized > 127) {
-      q_clipped++;
-      quantized = constrain(quantized, -128, 127);
-    }
-    const int8_t q = (int8_t)quantized;
-    model_input->data.int8[i] = q;
-    if (q < q_min) q_min = q;
-    if (q > q_max) q_max = q;
-    const uint8_t idx = (uint8_t)((int)q + 128);
-    level_seen[idx >> 3] |= (uint8_t)(1u << (idx & 7));
-  }
-
-  int distinct_levels = 0;
-  for (int b = 0; b < 32; b++) {
-    uint8_t v = level_seen[b];
-    while (v) {
-      distinct_levels += (v & 1);
-      v >>= 1;
-    }
-  }
+  const QuantStats qs = quantizeInputWindow();
 
   // ---- 4. Inferencia ------------------------------------------------------
   const uint32_t start_us = micros();
@@ -801,11 +1081,11 @@ void loop() {
 
   Serial.printf("[QUANT]   int8 min=%d max=%d | niveis_distintos=%d/256 | "
                 "saturados=%lu\n",
-                (int)q_min, (int)q_max, distinct_levels,
-                (unsigned long)q_clipped);
+                (int)qs.min, (int)qs.max, qs.distinct_levels,
+                (unsigned long)qs.clipped);
 
   // Alertas: cada um aponta uma causa concreta de saida congelada.
-  if (distinct_levels <= 2) {
+  if (qs.distinct_levels <= 2) {
     Serial.println("[!!] Entrada praticamente CONSTANTE apos a quantizacao. A "
                    "saida do modelo sera identica a cada janela.");
   }
@@ -830,11 +1110,11 @@ void loop() {
   // forte nao "estoura" o int8 aos poucos: ele achata contra -128/+127 e chega
   // ao modelo como onda quadrada. Qualquer classe predita nesse regime e um
   // artefato do ceifamento, nao uma leitura da vibracao.
-  if (q_clipped > (uint32_t)kWindowSize / 10) {
+  if (qs.clipped > (uint32_t)kWindowSize / 10) {
     Serial.printf("[!!] Quantizador ceifou %lu de %d amostras (%.0f%%). O sinal "
                   "chega ACHATADO ao modelo - a classe predita nao tem valor.\n",
-                  (unsigned long)q_clipped, kWindowSize,
-                  100.0f * q_clipped / kWindowSize);
+                  (unsigned long)qs.clipped, kWindowSize,
+                  100.0f * qs.clipped / kWindowSize);
   }
   const float amplitude_ratio = signal_std / kNormStd;
   if (amplitude_ratio < 0.1f || amplitude_ratio > 2.0f) {
