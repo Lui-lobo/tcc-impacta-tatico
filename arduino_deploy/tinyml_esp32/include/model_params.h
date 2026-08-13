@@ -6,9 +6,13 @@
 constexpr int kWindowSize = 512;
 constexpr int kNumClasses = 3;
 
+// Taxa de amostragem das janelas de treino, apos a decimacao do dataset CWRU.
+// O firmware deve amostrar o MPU6050 nesta mesma taxa.
+constexpr int kTrainingSampleRateHz = 1000;
+
 // Normalizacao estatistica aplicada no treino: (x - kNormMean) / kNormStd.
-constexpr float kNormMean = 0.0154723665f;
-constexpr float kNormStd = 0.3682984114f;
+constexpr float kNormMean = 0.0182875600f;
+constexpr float kNormStd = 0.0249428768f;
 
 // 'static' mantem uma copia por unidade de compilacao, evitando simbolos duplicados.
 static const char* const kClassLabels[kNumClasses] = {"0_normal", "1_inner_race", "2_outer_race"};

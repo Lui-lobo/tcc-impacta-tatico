@@ -1,6 +1,7 @@
 numpy
 scipy
 tensorflow
+scikit-learn
 pytest
 
 matplotlib

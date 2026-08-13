@@ -52,11 +52,14 @@ const unsigned int {array_name}_len = {len(tflite_content)};
     @staticmethod
     def generate_params_header(output_path: str, window_size: int, num_classes: int,
                                norm_mean: float, norm_std: float,
-                               class_labels: List[str]) -> None:
+                               class_labels: List[str],
+                               sample_rate_hz: int) -> None:
         """Exporta os parametros de pre-processamento usados no treino.
 
         Sem isso o ESP32 alimentaria o modelo com uma escala diferente da vista
         durante o treinamento, e a inferencia sairia sistematicamente errada.
+        A taxa de amostragem viaja junto para que o firmware possa comparar a
+        banda em que treinou com a banda que o sensor entrega.
         """
         labels = ", ".join(f'"{label}"' for label in class_labels)
         code = f"""{_HEADER_NOTICE}
@@ -66,6 +69,10 @@ const unsigned int {array_name}_len = {len(tflite_content)};
 // Numero de amostras por janela de vibracao (deve bater com o tensor de entrada).
 constexpr int kWindowSize = {window_size};
 constexpr int kNumClasses = {num_classes};
+
+// Taxa de amostragem das janelas de treino, apos a decimacao do dataset CWRU.
+// O firmware deve amostrar o MPU6050 nesta mesma taxa.
+constexpr int kTrainingSampleRateHz = {sample_rate_hz};
 
 // Normalizacao estatistica aplicada no treino: (x - kNormMean) / kNormStd.
 constexpr float kNormMean = {norm_mean:.10f}f;

@@ -74,14 +74,21 @@ class ModelEvaluator:
         flash_usage_kb = os.path.getsize(tflite_path) / 1024.0
         max_activation_size = 0
         for layer in model.layers:
-            if hasattr(layer, 'output_shape') and layer.output_shape is not None:
-                shape = layer.output_shape
-                if isinstance(shape, list): shape = shape[0]
-                valid_dims = [dim for dim in shape if dim is not None]
-                if valid_dims:
-                    size = np.prod(valid_dims) * 1 
-                    if size > max_activation_size:
-                        max_activation_size = size
+            # Keras 3 removeu o atributo `output_shape` das camadas; a forma
+            # agora sai do tensor de saída. O fallback mantém o suporte a Keras 2.
+            shape = None
+            try:
+                shape = layer.output.shape
+            except AttributeError:
+                shape = getattr(layer, 'output_shape', None)
+            if shape is None:
+                continue
+            if isinstance(shape, list): shape = shape[0]
+            valid_dims = [dim for dim in shape if dim is not None]
+            if valid_dims:
+                size = np.prod(valid_dims) * 1
+                if size > max_activation_size:
+                    max_activation_size = size
                         
         # Formatação MD
         markdown_content = f"""# 📈 Relatório de Desempenho, Gráficos e Consumo (TinyML)
@@ -91,11 +98,11 @@ As imagens abaixo foram geradas fisicamente em alta resolução (300 DPI) e salv
 
 ### 📊 Histórico de Treinamento (Curva de Aprendizado)
 Este gráfico valida o aprendizado das extrações de frequência ao longo do tempo.
-{f"![Curvas de Treinamento]({os.path.abspath(hist_png)})" if hist_png else "*Gráfico indisponível.*"}
+{f"![Curvas de Treinamento]({os.path.basename(hist_png)})" if hist_png else "*Gráfico indisponível.*"}
 
 ### 🎯 Matriz de Confusão Visual
 Mapeamento termográfico exato de onde o modelo classificou corretamente ou sofreu Falsos Positivos/Negativos.
-![Matriz de Confusão]({os.path.abspath(cm_png)})
+![Matriz de Confusão]({os.path.basename(cm_png)})
 
 ---
 
