@@ -444,6 +444,7 @@ níveis de carga e 3 diâmetros de defeito por classe de falha:
 | `tools/validacao_por_carga.py` | Validação deixando uma carga de fora (§6) |
 | `download_cwru.py` | Baixa os 28 arquivos do dataset |
 | `relatorios/relatorio_metricas.md` | Métricas do modelo no PC |
+| `docs/pipeline.md` | Como a pipeline funciona, etapa por etapa |
 | `docs/protocolo_validacao.md` | Este documento |
 
 O pipeline é determinístico (`SEED = 42` aplicado a NumPy, `random` e
