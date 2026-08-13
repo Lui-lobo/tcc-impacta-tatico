@@ -4,7 +4,8 @@ import numpy as np
 import tensorflow as tf
 from src.pipeline.data_processor import DataProcessor
 from src.pipeline.model_builder import TinyMLModelBuilder
-from src.pipeline.quantizer import ModelQuantizer
+from src.pipeline.quantizer import (ModelQuantizer, quantize_input,
+                                    reference_interpreter, round_half_away)
 from src.pipeline.c_generator import CArtifactGenerator
 from src.pipeline.evaluator import ModelEvaluator
 
@@ -74,6 +75,7 @@ def load_datasets(base_dir="data"):
 
     used_labels = []
     total_samples = 0
+    total_files = 0
     for folder in class_folders:
         try:
             class_label = int(folder.split('_')[0])  # Extrai o '0' de '0_normal'
@@ -92,6 +94,7 @@ def load_datasets(base_dir="data"):
             raw = processor.load_mat_file(mat_file)
             decimated = processor.resample_to(raw, source_rate, TARGET_SAMPLE_RATE_HZ)
             total_samples += len(decimated)
+            total_files += 1
 
             train_part, test_part = processor.split_time_series(decimated, TEST_RATIO)
             X_tr, y_tr = processor.create_windows(train_part, label=class_label)
@@ -126,21 +129,17 @@ def load_datasets(base_dir="data"):
     independent = int(total_samples // WINDOW_SIZE)
     print("-" * 95)
     print(f"      Sinal total apos decimacao: {total_samples} amostras "
-          f"({total_samples / TARGET_SAMPLE_RATE_HZ:.1f} s) "
-          f"=> {independent} janelas INDEPENDENTES (sem sobreposicao).")
+          f"({total_samples / TARGET_SAMPLE_RATE_HZ:.1f} s) de {total_files} "
+          f"arquivos => {independent} janelas INDEPENDENTES (sem sobreposicao).")
 
-    return X_train, y_train, X_test, y_test, used_labels
-
-
-def round_half_away(x: np.ndarray) -> np.ndarray:
-    """Arredondamento identico ao lroundf() da libc usada no ESP32.
-
-    np.round() usa arredondamento bancario (0.5 -> par mais proximo), enquanto
-    lroundf() afasta do zero. Sem esta compatibilizacao, os valores terminados
-    em exatamente .5 divergiriam em 1 LSB e a comparacao bit a bit acusaria
-    diferencas que nao existem no modelo.
-    """
-    return np.sign(x) * np.floor(np.abs(x) + 0.5)
+    info = {
+        'arquivos': total_files,
+        'duracao_s': total_samples / TARGET_SAMPLE_RATE_HZ,
+        'taxa_hz': TARGET_SAMPLE_RATE_HZ,
+        'janelas_independentes': independent,
+        'overlap': WINDOW_OVERLAP,
+    }
+    return X_train, y_train, X_test, y_test, used_labels, info
 
 
 def as_header_float(value: float) -> np.float32:
@@ -151,13 +150,6 @@ def as_header_float(value: float) -> np.float32:
     partiria de numeros ligeiramente diferentes.
     """
     return np.float32(float(f"{value:.10f}"))
-
-
-def quantize_input(normalized: np.ndarray, scale: float,
-                   zero_point: int) -> np.ndarray:
-    """Converte a janela normalizada em int8, como o firmware faz."""
-    q = round_half_away(normalized / np.float32(scale)) + zero_point
-    return np.clip(q, -128, 127).astype(np.int8)
 
 
 def fnv1a32(data: np.ndarray) -> int:
@@ -317,7 +309,8 @@ def main():
     tf.keras.utils.set_random_seed(SEED)
 
     print("[1/6] Carregando, decimando e janelando os datasets...")
-    X_train, y_train, X_test, y_test, class_folders = load_datasets(base_dir="data")
+    X_train, y_train, X_test, y_test, class_folders, dataset_info = load_datasets(
+        base_dir="data")
     num_classes = len(class_folders)
 
     # Embaralha o treino (as janelas saem em ordem temporal por arquivo).
@@ -419,7 +412,11 @@ def main():
 
     print("\n[6/6] Executando Inferências Finais e Medindo Hardware...")
     report_path = "relatorios/relatorio_metricas.md"
-    ModelEvaluator.generate_metrics_report(model, history, X_test, y_test, tflite_path, report_path)
+    dataset_info['janelas_treino'] = len(X_train)
+    dataset_info['janelas_teste'] = len(X_test)
+    ModelEvaluator.generate_metrics_report(
+        model, history, X_test, y_test, tflite_path, report_path,
+        dataset_info=dataset_info)
 
     print("\n========================================")
     print("[SUCESSO] Pipeline Finalizado!")

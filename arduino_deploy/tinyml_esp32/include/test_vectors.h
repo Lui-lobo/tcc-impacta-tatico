@@ -6,15 +6,15 @@
 
 // Janelas do conjunto de TESTE (nunca vistas no treino), decimadas para
 // 1000 Hz e armazenadas na flash para validacao embarcada.
-constexpr int kNumTestVectors = 112;
+constexpr int kNumTestVectors = 128;
 constexpr int kTestVectorWindow = 512;
 constexpr int kTestVectorClasses = 3;
 constexpr int kTestVectorSampleRateHz = 1000;
 
 // Reconstrucao do valor fisico: g = kTestVectorData[i] * kTestVectorScale.
-constexpr float kTestVectorScale = 2.928110689e-06f;
+constexpr float kTestVectorScale = 6.626966297e-06f;
 
-// 112 x 512 amostras, em ordem [vetor][amostra].
+// 128 x 512 amostras, em ordem [vetor][amostra].
 extern const int16_t kTestVectorData[];
 
 // Classe verdadeira de cada janela (indice em kClassLabels).

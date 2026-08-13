@@ -1,3 +1,8 @@
+# Dataset CWRU (~102 MB). Nao versionado: e dado publico e reproduzivel com
+# `python download_cwru.py`, que baixa exatamente os 28 arquivos usados no
+# treino. Ver README.md.
+data/**/*.mat
+
 # Python
 venv/
 __pycache__/

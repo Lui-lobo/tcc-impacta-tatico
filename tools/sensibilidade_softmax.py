@@ -38,7 +38,7 @@ FAIXAS = [(0.00, 0.70), (0.70, 0.90), (0.90, 0.99), (0.99, 1.01)]
 
 def preparar_entradas():
     """Reconstroi exatamente as janelas gravadas na flash do ESP32."""
-    X_train, _, X_test, y_test, _ = B.load_datasets("data")
+    X_train, _, X_test, y_test, _, _ = B.load_datasets("data")
     mean, std = np.mean(X_train), np.std(X_train)
 
     janelas = X_test.reshape(len(X_test), -1).astype(np.float32)
