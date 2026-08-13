@@ -157,11 +157,15 @@ data/                         dataset (não versionado)
 
 ## Documentação
 
+- **[`docs/pipeline.md`](docs/pipeline.md)** — como a pipeline funciona: o que
+  cada uma das seis etapas faz, por que faz assim, e como o resultado chega ao
+  ESP32. Comece por aqui para entender o código.
 - **[`docs/protocolo_validacao.md`](docs/protocolo_validacao.md)** — o que é
   validado, como reproduzir cada ensaio, resultados medidos no hardware e as
-  limitações a declarar. Comece por aqui.
+  limitações a declarar.
 - **[`tinyml_relatorio.md`](tinyml_relatorio.md)** — justificativa das decisões de
-  arquitetura da rede e da quantização.
+  arquitetura da rede e da quantização, especificação dos tensores e requisitos
+  de integração em C++.
 - **`relatorios/relatorio_metricas.md`** — gerado pelo `build.py` a cada execução.
 
 ---
