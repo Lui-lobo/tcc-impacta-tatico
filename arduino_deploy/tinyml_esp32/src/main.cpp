@@ -15,6 +15,12 @@
 #include "model_params.h"
 #include "model_tflite.h"
 
+#include <Wire.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
+
+Adafruit_MPU6050 mpu;
+
 // Area de trabalho do interpretador (tensores intermediarios + metadados).
 // O valor real consumido e impresso no setup(); ajuste se sobrar/faltar memoria.
 constexpr int kTensorArenaSize = 24 * 1024;
@@ -34,67 +40,34 @@ static void haltOnError(const char* message) {
   }
 }
 
-/*
- * TODO: substituir pela leitura real do acelerometro (MPU-6050 / ADXL345).
- * A taxa de amostragem precisa ser a mesma do CWRU (12 kHz) para que as
- * frequencias de falha caiam nas mesmas posicoes vistas no treino.
- */
 static void readAccelerometerWindow(float* buffer, int length) {
+  sensors_event_t a, g, temp;
   for (int i = 0; i < length; i++) {
-    buffer[i] = (float)random(-2000, 2000) / 1000.0f;
+    mpu.getEvent(&a, &g, &temp);
+    
+    // O dataset CWRU usa forca G. O MPU6050 retorna m/s^2.
+    // Precisamos dividir por 9.81 para normalizar a escala para 'g'.
+    buffer[i] = a.acceleration.z / 9.81f; 
   }
 }
-
-/*
- * ============================================================================
- * EXEMPLO DE INTEGRAÇÃO FUTURA COM MPU6050 (Mantido comentado a pedido do usuário)
- * ============================================================================
- * Para usar este código no futuro:
- * 1. Adicione "adafruit/Adafruit MPU6050" no seu arquivo platformio.ini (em lib_deps)
- * 2. Descomente as bibliotecas e variaveis globais abaixo
- * 3. Descomente a inicialização e coloque dentro do setup()
- * 4. Substitua a função readAccelerometerWindow atual por esta versão
- *
- * #include <Wire.h>
- * #include <Adafruit_MPU6050.h>
- * #include <Adafruit_Sensor.h>
- * 
- * Adafruit_MPU6050 mpu;
- * 
- * // Chame este trecho dentro da sua funcao setup():
- * // void setup_mpu() {
- * //   Wire.setClock(400000); // Configura o I2C em alta velocidade (400kHz)
- * //   if (!mpu.begin()) {
- * //     Serial.println("Falha ao encontrar o chip MPU6050");
- * //     while (1) { delay(10); }
- * //   }
- * //   mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
- * //   mpu.setFilterBandwidth(MPU6050_BAND_260_HZ); // Reduz atrasos no sensor
- * // }
- * 
- * // Esta será a função definitiva quando for usar o hardware real:
- * // static void readAccelerometerWindow(float* buffer, int length) {
- * //   sensors_event_t a, g, temp;
- * //   for (int i = 0; i < length; i++) {
- * //     mpu.getEvent(&a, &g, &temp);
- * //     
- * //     // O dataset CWRU usa forca G. O MPU6050 retorna m/s^2.
- * //     // Precisamos dividir por 9.81 para normalizar a escala para 'g'.
- * //     buffer[i] = a.acceleration.z / 9.81f; 
- * //     
- * //     // IMPORTANTE: Tentar atingir 12kHz reais via I2C é um desafio no ESP32.
- * //     // Voce pode adicionar um delayMicroseconds se precisar estabilizar a taxa,
- * //     // mas provavelmente o barramento I2C já sera o limitador de velocidade.
- * //   }
- * // }
- * ============================================================================
- */
 
 void setup() {
   Serial.begin(115200);
   while (!Serial) {
     delay(10);
   }
+
+  // Inicializacao do I2C com os pinos especificados: SDA = 21, SCL = 22
+  Wire.begin(21, 22);
+  Wire.setClock(400000); // Configura o I2C em alta velocidade (400kHz)
+  
+  if (!mpu.begin()) {
+    Serial.println("ERRO: Falha ao encontrar o chip MPU6050! Verifique as conexões.");
+    while (1) { delay(10); }
+  }
+  mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
+  mpu.setFilterBandwidth(MPU6050_BAND_260_HZ); // Reduz atrasos no sensor
+
 
   Serial.println();
   Serial.println("=== TinyML ESP32 - Diagnostico de Rolamentos ===");
