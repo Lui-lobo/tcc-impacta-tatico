@@ -46,6 +46,12 @@ EPOCHS = 40
 BATCH_SIZE = 32
 SEED = 42
 
+# Teto de janelas de teste gravadas na flash do ESP32 para a validacao
+# embarcada (comando 't' no console serial). Cada janela custa
+# WINDOW_SIZE * 2 bytes = 1 KB. Acima do teto, a selecao e estratificada e
+# preserva a proporcao entre as classes.
+MAX_TEST_VECTORS = 128
+
 
 def load_datasets(base_dir="data"):
     """Carrega, decima para TARGET_SAMPLE_RATE_HZ e janela cada arquivo .mat.
@@ -126,6 +132,180 @@ def load_datasets(base_dir="data"):
     return X_train, y_train, X_test, y_test, used_labels
 
 
+def round_half_away(x: np.ndarray) -> np.ndarray:
+    """Arredondamento identico ao lroundf() da libc usada no ESP32.
+
+    np.round() usa arredondamento bancario (0.5 -> par mais proximo), enquanto
+    lroundf() afasta do zero. Sem esta compatibilizacao, os valores terminados
+    em exatamente .5 divergiriam em 1 LSB e a comparacao bit a bit acusaria
+    diferencas que nao existem no modelo.
+    """
+    return np.sign(x) * np.floor(np.abs(x) + 0.5)
+
+
+def as_header_float(value: float) -> np.float32:
+    """Reproduz em Python o literal float32 que o header C vai receber.
+
+    generate_params_header() imprime as constantes com 10 casas decimais. Se o
+    Python continuasse usando o float64 original, a normalizacao das duas pontas
+    partiria de numeros ligeiramente diferentes.
+    """
+    return np.float32(float(f"{value:.10f}"))
+
+
+def quantize_input(normalized: np.ndarray, scale: float,
+                   zero_point: int) -> np.ndarray:
+    """Converte a janela normalizada em int8, como o firmware faz."""
+    q = round_half_away(normalized / np.float32(scale)) + zero_point
+    return np.clip(q, -128, 127).astype(np.int8)
+
+
+def fnv1a32(data: np.ndarray) -> int:
+    """Hash FNV-1a de 32 bits sobre os bytes da janela quantizada.
+
+    Serve para o ESP32 provar que a entrada que ele montou e byte a byte a
+    mesma que o PC usou. Sem essa checagem, uma divergencia na saida seria
+    ambigua: poderia estar na normalizacao, na quantizacao ou nos kernels.
+    Com ela, o teste isola a causa.
+    """
+    h = 2166136261
+    for b in data.astype(np.uint8).tolist():
+        h = ((h ^ b) * 16777619) & 0xFFFFFFFF
+    return h
+
+
+def reference_outputs(tflite_path: str, quantized: np.ndarray,
+                      resolver=None) -> np.ndarray:
+    """Roda o interpretador TFLite do PC e devolve o tensor de saida int8.
+
+    Este e o padrao-ouro contra o qual o ESP32 sera comparado. Recebe a entrada
+    JA quantizada, para que a aritmetica de pre-processamento seja rigorosamente
+    a mesma nas duas pontas e a comparacao meça apenas os kernels.
+
+    O parametro `resolver` escolhe QUAIS kernels executam os operadores, e essa
+    escolha nao e cosmetica:
+
+      BUILTIN     - kernels otimizados do TFLite de desktop (XNNPACK, ruy).
+                    Reordenam acumulacoes e usam caminhos vetorizados.
+      BUILTIN_REF - kernels de referencia, aritmetica inteira em ordem
+                    canonica. E o que o TensorFlow Lite MICRO implementa.
+
+    Comparar o ESP32 contra os kernels otimizados mede a diferenca entre duas
+    implementacoes distintas, e nao a fidelidade do deploy. A referencia
+    correta para o microcontrolador e BUILTIN_REF.
+    """
+    if resolver is None:
+        resolver = tf.lite.experimental.OpResolverType.BUILTIN_REF
+
+    interpreter = tf.lite.Interpreter(
+        model_path=tflite_path, experimental_op_resolver_type=resolver)
+    interpreter.allocate_tensors()
+    inp = interpreter.get_input_details()[0]
+    out = interpreter.get_output_details()[0]
+
+    result = np.zeros((len(quantized), int(out['shape'][-1])), dtype=np.int8)
+    for i in range(len(quantized)):
+        interpreter.set_tensor(inp['index'], quantized[i].reshape(inp['shape']))
+        interpreter.invoke()
+        result[i] = interpreter.get_tensor(out['index'])[0]
+    return result
+
+
+def input_quantization_params(tflite_path: str):
+    """Escala e zero-point do tensor de entrada do modelo quantizado."""
+    interpreter = tf.lite.Interpreter(model_path=tflite_path)
+    interpreter.allocate_tensors()
+    quant = interpreter.get_input_details()[0]['quantization']
+    return np.float32(quant[0]), int(quant[1])
+
+
+def stratified_subset(labels: np.ndarray, max_count: int, seed: int) -> np.ndarray:
+    """Indices de um subconjunto que preserva a proporcao entre as classes."""
+    if len(labels) <= max_count:
+        return np.arange(len(labels))
+    rng = np.random.default_rng(seed)
+    keep = []
+    for c in np.unique(labels):
+        idx = np.flatnonzero(labels == c)
+        quota = max(1, int(round(max_count * len(idx) / len(labels))))
+        keep.append(rng.choice(idx, size=min(quota, len(idx)), replace=False))
+    return np.sort(np.concatenate(keep))
+
+
+def export_test_vectors(X_test_raw, y_test, tflite_path, mean, std,
+                        header_path, source_path):
+    """Grava o conjunto de teste na flash e imprime o custo.
+
+    IMPORTANTE: as janelas sao exportadas ANTES da normalizacao, em unidades
+    fisicas. O ESP32 aplica a propria normalizacao e a propria quantizacao, de
+    modo que o teste embarcado exercita a cadeia inteira, e nao apenas o
+    Invoke() do interpretador.
+    """
+    windows = X_test_raw.reshape(len(X_test_raw), -1).astype(np.float32)
+    labels = y_test.astype(np.uint8)
+
+    selection = stratified_subset(labels, MAX_TEST_VECTORS, SEED)
+    windows, labels = windows[selection], labels[selection]
+
+    # Escala unica para todo o conjunto: preserva a relacao de amplitude entre
+    # as janelas, que e justamente o que distingue as classes.
+    scale = np.float32(np.max(np.abs(windows)) / 32767.0)
+    q16 = np.clip(round_half_away(windows / scale), -32768, 32767).astype(np.int16)
+
+    # A referencia e calculada sobre o sinal JA reconstruido do int16, para que
+    # qualquer divergencia observada no ESP32 venha do hardware e nao do
+    # arredondamento do proprio vetor de teste.
+    recon = q16.astype(np.float32) * scale
+    normalized = (recon - as_header_float(mean)) / (as_header_float(std) + np.float32(1e-8))
+
+    in_scale, in_zero_point = input_quantization_params(tflite_path)
+    quantized = quantize_input(normalized, in_scale, in_zero_point)
+    input_hash = np.array([fnv1a32(q) for q in quantized], dtype=np.uint32)
+
+    ref_out = reference_outputs(
+        tflite_path, quantized,
+        resolver=tf.lite.experimental.OpResolverType.BUILTIN_REF)
+
+    # Quanto os kernels otimizados de desktop se afastam dos de referencia.
+    # Este numero e o piso da divergencia esperada no ESP32 caso a comparacao
+    # fosse feita contra o interpretador padrao, e explica por que a referencia
+    # gravada usa BUILTIN_REF.
+    opt_out = reference_outputs(
+        tflite_path, quantized,
+        resolver=tf.lite.experimental.OpResolverType.BUILTIN)
+    kernel_gap = int(np.max(np.abs(opt_out.astype(np.int16) -
+                                   ref_out.astype(np.int16))))
+    kernel_same = int(np.mean(np.all(opt_out == ref_out, axis=1)) * 100)
+
+    CArtifactGenerator.generate_test_vectors(
+        header_path=header_path,
+        source_path=source_path,
+        windows_i16=q16,
+        labels=labels,
+        reference_output=ref_out,
+        input_hash=input_hash,
+        scale=float(scale),
+        sample_rate_hz=TARGET_SAMPLE_RATE_HZ,
+    )
+
+    ref_pred = ref_out.argmax(axis=1)
+    flash_kb = (q16.nbytes + labels.nbytes + ref_out.nbytes
+                + input_hash.nbytes) / 1024.0
+    counts = np.bincount(labels, minlength=int(labels.max()) + 1)
+    print(f"      {len(labels)} de {len(y_test)} janelas de teste gravadas "
+          f"(distribuicao: {counts.tolist()})")
+    print(f"      Escala do vetor: {float(scale):.9e} g/LSB "
+          f"| custo em flash: {flash_kb:.1f} KB")
+    print(f"      Acuracia da referencia (kernels BUILTIN_REF, = TFLite Micro): "
+          f"{100.0 * np.mean(ref_pred == labels):.2f}%")
+    print(f"      Acuracia com kernels otimizados de desktop (BUILTIN): "
+          f"{100.0 * np.mean(opt_out.argmax(axis=1) == labels):.2f}%")
+    print(f"      Divergencia entre os dois conjuntos de kernels no PC: "
+          f"{kernel_same}% identicas | desvio max = {kernel_gap} LSB")
+    print(f"      Use o comando 't' no console serial do ESP32 para reproduzi-la "
+          f"no hardware.")
+
+
 def main():
     print("========================================")
     print(" INICIANDO BUILD E AVALIAÇÃO DO TINYML")
@@ -136,7 +316,7 @@ def main():
     # reproduzidos por quem avaliar o TCC.
     tf.keras.utils.set_random_seed(SEED)
 
-    print("[1/5] Carregando, decimando e janelando os datasets...")
+    print("[1/6] Carregando, decimando e janelando os datasets...")
     X_train, y_train, X_test, y_test, class_folders = load_datasets(base_dir="data")
     num_classes = len(class_folders)
 
@@ -149,6 +329,11 @@ def main():
     # conjunto de teste permaneca realmente inedito.
     mean = np.mean(X_train)
     std = np.std(X_train)
+
+    # Copia em unidades fisicas, antes da normalizacao: e este sinal que sera
+    # gravado na flash do ESP32 para a validacao embarcada (etapa 5).
+    X_test_raw = X_test.copy()
+
     X_train = (X_train - mean) / (std + 1e-8)
     X_test = (X_test - mean) / (std + 1e-8)
 
@@ -174,7 +359,7 @@ def main():
     print(f"      Pesos por classe: "
           f"{ {i: round(w, 3) for i, w in class_weight.items()} }")
 
-    print("\n[2/5] Construindo e treinando a CNN 1D...")
+    print("\n[2/6] Construindo e treinando a CNN 1D...")
     builder = TinyMLModelBuilder()
     model = builder.build_cnn1d(input_shape=(WINDOW_SIZE, 1), num_classes=num_classes)
 
@@ -201,12 +386,12 @@ def main():
         callbacks=[early_stop],
     )
 
-    print("\n[3/5] Quantizando (Float32 -> Int8)...")
+    print("\n[3/6] Quantizando (Float32 -> Int8)...")
     tflite_path = os.path.join(PIO_PROJECT_DIR, "model_quantized.tflite")
     quantizer = ModelQuantizer(keras_model=model, representative_dataset=X_train)
     quantizer.quantize_to_int8(output_path=tflite_path)
 
-    print("\n[4/5] Convertendo para artefatos da linguagem C (projeto PlatformIO)...")
+    print("\n[4/6] Convertendo para artefatos da linguagem C (projeto PlatformIO)...")
     c_header_path = os.path.join(PIO_PROJECT_DIR, "include", "model_tflite.h")
     c_source_path = os.path.join(PIO_PROJECT_DIR, "src", "model_tflite.cpp")
     params_path = os.path.join(PIO_PROJECT_DIR, "include", "model_params.h")
@@ -224,7 +409,15 @@ def main():
         sample_rate_hz=TARGET_SAMPLE_RATE_HZ,
     )
 
-    print("\n[5/5] Executando Inferências Finais e Medindo Hardware...")
+    print("\n[5/6] Exportando o conjunto de teste para validacao embarcada...")
+    vectors_header = os.path.join(PIO_PROJECT_DIR, "include", "test_vectors.h")
+    vectors_source = os.path.join(PIO_PROJECT_DIR, "src", "test_vectors.cpp")
+    export_test_vectors(
+        X_test_raw, y_test, tflite_path, mean, std,
+        header_path=vectors_header, source_path=vectors_source,
+    )
+
+    print("\n[6/6] Executando Inferências Finais e Medindo Hardware...")
     report_path = "relatorios/relatorio_metricas.md"
     ModelEvaluator.generate_metrics_report(model, history, X_test, y_test, tflite_path, report_path)
 
@@ -232,6 +425,7 @@ def main():
     print("[SUCESSO] Pipeline Finalizado!")
     print(f"Modelo em C:    {c_source_path}")
     print(f"Parametros:     {params_path}")
+    print(f"Vetores teste:  {vectors_source}")
     print(f"Para gravar:    cd {PIO_PROJECT_DIR} && pio run -t upload")
     print("========================================")
 

@@ -70,6 +70,44 @@ def test_split_has_no_shared_samples():
     assert len(np.intersect1d(treino, teste)) == 0, "Vazamento entre treino e teste"
 
 
+def test_round_half_away_matches_lroundf():
+    """
+    O arredondamento usado ao gerar os vetores de teste precisa afastar do
+    zero, como o lroundf() do ESP32 - e não arredondar para o par mais
+    próximo, como o np.round(). Sem isso a comparação bit a bit entre PC e
+    microcontrolador acusaria diferenças inexistentes.
+    """
+    from build import round_half_away
+
+    entrada = np.array([0.5, 1.5, 2.5, -0.5, -1.5, -2.5, 2.4, -2.4])
+    esperado = np.array([1.0, 2.0, 3.0, -1.0, -2.0, -3.0, 2.0, -2.0])
+
+    assert np.array_equal(round_half_away(entrada), esperado)
+    # E é justamente onde np.round() divergiria:
+    assert not np.array_equal(np.round(entrada), esperado)
+
+
+def test_stratified_subset_preserves_proportions():
+    """
+    Ao truncar o conjunto de teste gravado na flash, a seleção deve manter a
+    proporção entre as classes e não repetir janelas.
+    """
+    from build import stratified_subset
+
+    labels = np.array([0] * 16 + [1] * 48 + [2] * 48, dtype=np.uint8)
+
+    # Abaixo do teto: nada é descartado.
+    assert len(stratified_subset(labels, 128, seed=42)) == len(labels)
+
+    idx = stratified_subset(labels, 56, seed=42)
+    assert len(np.unique(idx)) == len(idx), "Janela repetida na seleção"
+    contagem = np.bincount(labels[idx], minlength=3)
+    assert abs(len(idx) - 56) <= 3, f"Tamanho fora do alvo: {len(idx)}"
+    # Cada classe fica perto da metade do seu total original (56/112).
+    for classe, total in enumerate([16, 48, 48]):
+        assert contagem[classe] == pytest.approx(total / 2, abs=1)
+
+
 def test_model_build():
     """
     Testa se o modelo Keras está respeitando as dimensões e 
