@@ -28,6 +28,7 @@ separa os ensaios exatamente nessas camadas.
 | **V1** | Aquisição: I2C, taxa de amostragem, jitter, resolução | Excitação mecânica externa | ✅ aprovado |
 | **V2** | Inferência embarcada: normalização, quantização, aritmética int8 | Injeção do conjunto de teste (`t`) | ✅ aprovado |
 | **V3** | Generalização para rolamento físico | Bancada com eixo girando | ❌ fora do escopo |
+| **V4** | Generalização entre condições de operação | Validação deixando uma carga de fora | ⚠️ aprovado com ressalva |
 
 ---
 
@@ -148,42 +149,43 @@ o firmware volta a amostrar o sensor no ciclo padrão.
 | Acurácia no ESP32 | ≈ acurácia da referência | Vetor ou constantes divergentes |
 | `Invoke()` falhou | 0 janelas | Arena insuficiente ou operador ausente |
 | Saída int8 idêntica | *diagnóstico, não critério* | ver §3.1 |
+| Divergência de classe | apenas em janelas de confiança < 0,90 | ver §3.1 |
 
-### Registro do ensaio — PC (13/08/2026)
-
-| Métrica | Valor |
-|---|---|
-| Janelas gravadas | 112 de 112 (16 / 48 / 48 por classe) |
-| Escala do vetor | 2,928110689e-06 g/LSB |
-| Custo em flash | 112,9 KB |
-| Acurácia do modelo Keras (float32) | 97,32% |
-| Acurácia da referência TFLite int8 (kernels `BUILTIN_REF`) | 96,43% |
-| Acurácia com kernels otimizados de desktop (`BUILTIN`) | 96,43% |
-| Divergência entre os dois conjuntos de kernels no PC | 0 LSB, 100% idênticas |
-
-A diferença de 0,89 pp entre Keras e TFLite corresponde a **exatamente uma
-janela** (109 contra 108 acertos em 112). Esse é o custo medido da quantização
-int8 e deve constar do relatório — é um resultado, não um defeito.
-
-A referência gravada usa os kernels `BUILTIN_REF`, que são os que o TensorFlow
-Lite **Micro** implementa. Os kernels otimizados de desktop (XNNPACK/ruy) foram
-verificados e produzem saída idêntica, então essa escolha não afeta os números —
-mas mantém a comparação metodologicamente correta.
-
-### Registro do ensaio — ESP32 (13/08/2026)
+### Registro do ensaio — PC, dataset atual de 28 arquivos (13/08/2026)
 
 | Métrica | Valor |
 |---|---|
-| **Entrada int8 idêntica ao PC** | **100,00%** (112/112) |
-| Acurácia no ESP32 | 98,21% (110/112) |
-| Mesma classe que o PC | **98,21%** (110/112) |
-| Saída int8 idêntica ao PC | 75,00% (84/112), desvio máx. 22 LSB |
-| ↳ descontando as saturadas | 41,67% (20/48) |
-| Saídas saturadas (`int8 = 127`) | 57,14% (64/112) |
+| Janelas gravadas na flash | 128 de 1.313 (16 / 56 / 56 por classe) |
+| Escala do vetor | 6,626966297e-06 g/LSB |
+| Custo em flash | 129,0 KB |
+| Acurácia Keras float32, conjunto de teste completo | 99,39% |
+| Acurácia TFLite int8, conjunto de teste completo | 99,77% |
+| Acurácia da referência sobre as 128 janelas exportadas | 99,22% |
+| Divergência entre `BUILTIN` e `BUILTIN_REF` no PC | 0 LSB, 100% idênticas |
+
+As três acurácias medem coisas diferentes e não devem ser comparadas entre si: as
+duas primeiras cobrem as 1.313 janelas de teste; a terceira, apenas o subconjunto
+de 128 gravado no microcontrolador.
+
+A referência usa os kernels `BUILTIN_REF`, que são os que o TensorFlow Lite
+**Micro** implementa. Os otimizados de desktop (XNNPACK/ruy) foram verificados e
+produzem saída idêntica, então a escolha não afeta os números — mas mantém a
+comparação metodologicamente correta.
+
+### Registro do ensaio — ESP32, dataset de 28 arquivos (13/08/2026)
+
+| Métrica | Valor |
+|---|---|
+| **Entrada int8 idêntica ao PC** | **100,00%** (128/128) |
+| **Mesma classe que o PC** | **99,22%** (127/128) |
+| Acurácia no ESP32 | 98,44% (126/128) |
+| Acurácia da referência sobre as mesmas 128 janelas | 99,22% (127/128) |
+| Saída int8 idêntica ao PC | 89,84% (115/128), desvio máx. 104 LSB |
+| Saídas com a classe vencedora saturada (`int8 = 127`) | 94,53% (121/128) |
 | `Invoke()` falhou | 0 janelas |
-| Inferência (mín / médio / máx) | 9.307 / 9.392 / 9.856 µs |
-| Vazão máxima | 106,5 janelas/s |
-| Ciclo útil (janela de 512 ms) | 1,83% |
+| Inferência (mín / médio / máx) | 9.207 / 9.299 / 9.697 µs |
+| Vazão máxima | 107,5 janelas/s |
+| Ciclo útil (janela de 512 ms) | 1,82% |
 | Arena utilizada | 4.716 de 24.576 bytes (19,2%) |
 
 Matriz de confusão medida no hardware:
@@ -191,101 +193,83 @@ Matriz de confusão medida no hardware:
 | verdade \ predito | normal | inner_race | outer_race | recall |
 |---|---|---|---|---|
 | `0_normal` | 16 | 0 | 0 | 100,00% |
-| `1_inner_race` | 0 | 48 | 0 | 100,00% |
-| `2_outer_race` | 0 | 2 | 46 | 95,83% |
+| `1_inner_race` | 0 | 54 | 2 | 96,43% |
+| `2_outer_race` | 0 | 0 | 56 | 100,00% |
 
-### 3.1 Interpretação da divergência de 25%
+**Veredito: aprovado.** A entrada é bit a bit idêntica à do PC, e das 128 janelas
+apenas uma (#035) recebe classe diferente da referência. Nenhuma falha de
+`Invoke()`, arena em 19% e ciclo útil de 1,8%.
 
-A taxa de igualdade byte a byte (75%) exige leitura cuidadosa, e três fatos a
-explicam:
+### 3.1 Onde ficam as divergências
 
-**1. As janelas "idênticas" incluem saturação trivial.** As 64 janelas das
-classes 0 e 1 saíram todas com confiança 0,9961 — que é `int8 = 127`, o teto da
-representação. Nessa condição qualquer diferença aritmética interna é ceifada
-pelo limite superior, e a igualdade é trivial. Elas não constituem evidência de
-identidade aritmética. O firmware passou a reportar essa fração separadamente.
+Toda a divergência se concentra em **7 janelas** — as únicas em que a softmax não
+satura. As outras 121 têm a classe vencedora em `int8 = 127`.
 
-**2. Toda a divergência está na classe 2.** As 28 janelas com desvio diferente de
-zero são exatamente as de `2_outer_race`, a única classe cujas confianças variam
-(0,55 a 0,99) em vez de saturar.
+| Janela | Verdade | Confiança | Desvio | Observação |
+|---|---|---|---|---|
+| #034 | 1 | 0,5000 | 52 LSB | empate exato entre duas classes |
+| #035 | 1 | 0,7031 | **104 LSB** | única divergência de classe |
+| #036 | 1 | 0,5000 | 52 LSB | empate exato |
+| #037 | 1 | 0,8477 | 37 LSB | PC e ESP32 erram juntos |
+| #038 | 1 | 0,5000 | 52 LSB | empate exato |
+| #074 | 2 | 0,9688 | 10 LSB | |
+| #098 | 2 | 0,9688 | 7 LSB | |
 
-**3. O desvio cresce onde a confiança cai.** Correlação direta nos dados:
-
-| Janelas | Confiança | Desvio |
-|---|---|---|
-| #078–#092 | 0,98–0,99 | 0 LSB |
-| #101–#105 | 0,80–0,86 | 6–18 LSB |
-| #107–#111 | 0,55–0,77 | 9–22 LSB |
-
-Esse é o comportamento esperado da softmax: uma diferença de 1–2 LSB nos logitos
-produz variação grande na probabilidade quando as classes estão empatadas, e
-quase nenhuma quando uma delas domina. **Divergência grande com confiança alta
-seria o sinal preocupante; o padrão observado é o inverso.**
-
-**4. A entrada bate em 100%.** O firmware compara o *hash FNV-1a da janela já
-quantizada* contra o valor calculado no PC, e o resultado foi **112/112**. Isso
-prova, byte a byte, que:
-
-- o armazenamento em `int16` e a reconstrução para `float` são exatos;
-- a normalização `(x − 0,0182876) / 0,0249429` produz o mesmo resultado nas duas
-  pontas, em `float32`;
-- a quantização — incluindo a equivalência entre `lroundf()` e `round_half_away`
-  — é idêntica.
-
-Com a entrada provada igual e a saída divergente, **a causa está isolada por
-eliminação nos kernels**: TensorFlow Lite Micro e TensorFlow Lite são
-implementações distintas da mesma especificação int8.
+Confiança de 0,5000 é `int8 = 0`: um empate perfeito entre duas classes. As
+janelas #034 a #038 são um trecho contíguo de sinal em que o modelo genuinamente
+não decide.
 
 #### Confirmação quantitativa
 
-A afirmação "a softmax amplifica 1–2 LSB" foi medida, não apenas alegada. O
-script `tools/sensibilidade_softmax.py` perturba cada logito em ±1 LSB
-(escala = 0,2015) e mede o deslocamento da saída quantizada:
+O script `tools/sensibilidade_softmax.py` perturba cada logito em ±1 LSB
+(escala = 0,8608 neste modelo) e mede o deslocamento da saída quantizada:
 
 | Faixa de confiança | Janelas | Desvio médio | Desvio máx. |
 |---|---|---|---|
-| 0,00 – 0,70 | 4 | 12,5 LSB | 13 LSB |
-| 0,70 – 0,90 | 13 | 8,5 LSB | 11 LSB |
-| 0,90 – 0,99 | 22 | 2,4 LSB | 5 LSB |
-| 0,99 – 1,00 | 73 | 0,1 LSB | 1 LSB |
+| 0,00 – 0,70 | 16 | 52,0 LSB | 52 LSB |
+| 0,70 – 0,90 | 33 | 51,5 LSB | 52 LSB |
+| 0,90 – 0,99 | 45 | 9,7 LSB | 21 LSB |
+| 0,99 – 1,00 | 1.219 | 0,1 LSB | 2 LSB |
 
-Comparando com o que o ESP32 realmente produziu:
+O casamento com o hardware é exato:
 
-| Faixa | Previsto para 1 LSB | Observado no ESP32 |
-|---|---|---|
-| ≥ 0,99 | máx. 1 | 0 a 1 ✅ |
-| 0,90 – 0,99 | máx. 5 | 0 a 5 ✅ |
-| 0,70 – 0,90 | máx. 11 | 6 a 20 (≈ 2 LSB) |
-| < 0,70 | máx. 13 | 12 a 22 (≈ 2 LSB) |
+- #034, #036 e #038 têm desvio de **52 LSB — precisamente o previsto para 1 LSB**
+  de diferença nos logitos.
+- #035 tem **104 LSB = 2 × 52**, ou seja, 2 LSB.
+- #074 e #098, com 10 e 7 LSB, caem na banda 0,90–0,99, cuja média prevista é 9,7.
 
-As duas primeiras faixas são explicadas exatamente por **1 LSB** de diferença nos
-logitos; as duas últimas, por **2 LSB**. A sensibilidade é cerca de 100x maior nas
-janelas de baixa confiança do que nas saturadas.
+**A divergência entre TFLite Micro e TFLite continua limitada a 1–2 LSB nos
+logitos**, o mesmo resultado obtido com o dataset anterior. Os desvios em LSB da
+saída cresceram (104 contra 22) apenas porque a escala dos logitos subiu de
+0,2015 para 0,8608 no modelo retreinado — 4,3x. Não é perda de fidelidade: é o
+mesmo erro aritmético visto através de um quantizador mais grosseiro.
 
-**Conclusão:** a divergência entre TFLM e TFLite está limitada a ≈ 2 LSB nos
-logitos — cerca de 0,4 em unidades de logito — o que é o esperado para
-implementações independentes de acumulação e requantização em int8. Não há
-defeito no deploy.
+#### Ressalva sobre a métrica "descontando as saturadas"
 
-### 3.2 O ESP32 acertou duas janelas que o PC errou
+O firmware reporta `0,00% (0/7)` nessa linha. O denominador de 7 torna a
+porcentagem inútil, e o rótulo é impreciso: a saturação garante igualdade apenas
+no byte da **classe vencedora**. Seis janelas saturadas (#073, #091, #092, #093,
+#094, #097) têm desvio de 1 a 7 LSB nas classes perdedoras.
 
-| Janela | Verdade | PC | ESP32 | Confiança |
-|---|---|---|---|---|
-| #108 | 2 | 1 ✗ | 2 ✓ | 0,5508 |
-| #109 | 2 | 1 ✗ | 1 ✗ | 0,6484 |
-| #110 | 2 | 1 ✗ | 2 ✓ | 0,5508 |
-| #111 | 2 | 1 ✗ | 1 ✗ | 0,7695 |
+Com o dataset maior o modelo ficou muito mais confiante — 94,5% de saídas
+saturadas contra 57,1% antes — e a amostra não saturada encolheu a ponto de a
+métrica perder sentido. **As métricas que decidem o deploy são as duas primeiras
+da tabela: entrada idêntica (100%) e mesma classe que o PC (99,22%).**
 
-O PC erra quatro janelas (108/112 = 96,43%); o ESP32 erra duas (110/112 =
-98,21%). **Isso não é uma melhoria.** As quatro janelas estão na fronteira de
-decisão, com confiança entre 0,55 e 0,77, e são justamente as de maior desvio em
-LSB. O microcontrolador caiu do lado certo em duas delas por ruído numérico, não
-por mérito.
+### 3.2 O sentido da diferença é aleatório
 
-**A acurácia a declarar no TCC é 96,43%**, a da referência. Reportar 98,21%
-seria selecionar o número favorável produzido por ruído de arredondamento.
+| Execução | Acurácia ESP32 | Acurácia PC | Diferença |
+|---|---|---|---|
+| Dataset de 3 arquivos | 98,21% (110/112) | 96,43% (108/112) | ESP32 **+2** janelas |
+| Dataset de 28 arquivos | 98,44% (126/128) | 99,22% (127/128) | ESP32 **−1** janela |
 
----
+Na primeira execução o microcontrolador acertou duas janelas que o PC errou; na
+segunda, errou uma que o PC acertou. Isso encerra qualquer tentação de tratar a
+diferença como mérito ou defeito: **é ruído de arredondamento em janelas de
+fronteira, e muda de sinal entre execuções.**
+
+Reporte a acurácia da referência, não a do microcontrolador.
+
 
 ## 4. Custo do ensaio V2 no hardware
 
@@ -294,7 +278,7 @@ vetores:
 
 | Recurso | Antes | Depois | Δ |
 |---|---|---|---|
-| Flash | 385.001 B (29,4%) | 503.537 B (38,4%) | +115 KB |
+| Flash | 385.001 B (29,4%) | 520.801 B (39,7%) | +132 KB |
 | RAM | 52.224 B (15,9%) | 52.256 B (15,9%) | +32 B |
 
 Os vetores residem em `.rodata`, mapeada na flash (DROM) do ESP32, e não
@@ -322,42 +306,118 @@ Enquanto V3 não existir, a afirmação defensável do trabalho é:
 > O sistema adquire vibração a 1 kHz com jitter inferior a 1,4% do intervalo de
 > amostragem e executa a inferência da CNN quantizada em int8 no ESP32 em
 > 9,4 ms, ocupando 4,7 KB de arena e 1,8% do ciclo de aquisição. A inferência
-> embarcada reproduz a decisão do interpretador de referência em 110 das 112
-> janelas de teste; as duas divergências ocorrem em janelas de baixa confiança
-> (< 0,78), onde a softmax amplifica diferenças de arredondamento entre as
-> implementações do TensorFlow Lite e do TensorFlow Lite Micro. A acurácia de
-> 96,43% refere-se ao conjunto de teste do dataset CWRU.
+> embarcada reproduz a decisão do interpretador de referência, e as divergências
+> residuais se restringem a janelas de baixa confiança, onde a softmax amplifica
+> diferenças de arredondamento entre as implementações do TensorFlow Lite e do
+> TensorFlow Lite Micro. Sobre o conjunto de teste do CWRU, a acurácia é de
+> 99,77% com divisão temporal intra-arquivo e de 86,01% quando o modelo é
+> avaliado numa condição de carga inédita — 99,50% se excluída a condição sem
+> carga, na qual o método não é confiável (§6).
 
 E não:
 
-> O sistema detecta falhas de rolamento com 96,43% de acurácia.
+> O sistema detecta falhas de rolamento com 99,77% de acurácia.
 
 ---
 
-## 6. Limitações a declarar no relatório
+## 6. Ensaio V4 — Generalização entre condições de operação
 
-1. **Volume de dados.** Após a decimação para 1 kHz existem apenas **49 janelas
-   independentes** (25,4 s de sinal ÷ 512 amostras). As 112 janelas de teste
-   têm sobreposição de 93,75% e não são amostras estatisticamente independentes.
-2. **Seleção de época no conjunto de teste.** Não há dados suficientes para um
-   terceiro conjunto, então o `EarlyStopping` usa o próprio conjunto de teste
-   para escolher a melhor época. A acurácia é, portanto, **otimista**.
-3. **Banda de frequência.** O CWRU foi gravado a 12 kHz (48 kHz na baseline); o
-   MPU6050 não passa de 1 kHz. A decimação para 1 kHz descarta o conteúdo acima
-   de 500 Hz, incluindo a banda de ressonância de 2–5 kHz classicamente usada em
-   diagnóstico de rolamentos. O modelo opera apenas sobre as componentes de baixa
-   frequência.
+### O problema
+O `build.py` divide treino e teste por trecho temporal **dentro de cada
+arquivo**. Não há vazamento de amostras — existe uma zona morta de uma janela
+inteira na fronteira — mas toda janela de teste tem uma contraparte de treino da
+**mesma gravação**: mesmo rolamento, mesmo defeito, mesma carga, mesma montagem,
+mesma sessão. É vazamento no nível da gravação, e é o que sustenta a acurácia de
+99,77%.
+
+### Procedimento
+`python tools/validacao_por_carga.py`. Treina com os primeiros 85% dos arquivos
+de três níveis de carga (validação nos 15% finais, só para o *early stopping*) e
+testa em **todos** os arquivos da quarta carga, em janelas sem sobreposição.
+
+### Resultado medido (13/08/2026)
+
+| Teste | rpm | Janelas | Acurácia | Detecção | Falso alarme | Recall normal / inner / outer |
+|---|---|---|---|---|---|---|
+| 0 hp | 1797 | 123 | **45,53%** | **42,98%** | 0,00% | 100,0% / 47,4% / 35,1% |
+| 1 hp | 1772 | 133 | 100,00% | 100,00% | 0,00% | 100,0% / 100,0% / 100,0% |
+| 2 hp | 1750 | 133 | 100,00% | 100,00% | 0,00% | 100,0% / 100,0% / 100,0% |
+| 3 hp | 1730 | 134 | 98,51% | 100,00% | 0,00% | 100,0% / 96,6% / 100,0% |
+| **Média** | | | **86,01%** (σ 23,38 pp) | **85,75%** (σ 24,69 pp) | 0,00% | |
+
+*Detecção* = fração das janelas com falha que **não** foram chamadas de normal.
+
+### Interpretação
+
+**O modelo generaliza entre cargas — exceto a 0 hp.** Com o rolamento sob carga
+(1 a 3 hp), a acurácia numa condição inédita fica entre 98,5% e 100%. Sem carga,
+desaba para 45,5%.
+
+**E o modo de falha é o pior possível.** A 0 hp, a detecção cai para 42,98%: mais
+da metade das janelas de rolamento defeituoso é classificada como **normal**. Não
+é confusão entre pista interna e externa — é falha de detecção. Num sistema de
+manutenção preditiva, esse é o erro caro.
+
+A explicação é física e coerente: sem carga radial, os elementos rolantes batem
+no defeito com pouca energia, e a assinatura de impacto se aproxima da linha de
+base saudável. A decimação para 1 kHz agrava o quadro, porque descarta a banda de
+ressonância de 2–5 kHz onde esses impactos fracos ainda seriam visíveis.
+
+O **falso alarme é 0% em todas as cargas**: o modelo nunca acusa defeito num
+rolamento saudável. Ele é conservador — e para manutenção preditiva esse é
+justamente o viés indesejado, porque o custo de uma parada não detectada supera o
+de uma inspeção desnecessária.
+
+### Consequência para o TCC
+
+Reporte os dois números, com os papéis explícitos:
+
+| Protocolo | Acurácia | O que mede |
+|---|---|---|
+| Divisão temporal intra-arquivo | 99,77% | limite superior; consistência dentro da condição |
+| Deixando uma carga de fora | 86,01% | generalização para condição inédita |
+| ↳ apenas cargas 1–3 hp | 99,50% | generalização sob carga |
+
+E declare a limitação de operação: **o sistema não é confiável com o rolamento
+descarregado**.
+
+---
+
+## 7. Limitações a declarar no relatório
+
+1. **Generalização a 0 hp.** Ver §6. É a limitação mais séria do trabalho.
+2. **Banda de frequência.** O CWRU foi gravado a 12 kHz (48 kHz na baseline); o
+   MPU6050 não passa de 1 kHz. A decimação descarta o conteúdo acima de 500 Hz,
+   incluindo a banda de ressonância de 2–5 kHz classicamente usada em
+   diagnóstico de rolamentos. Essa é a causa provável da falha a 0 hp, e é uma
+   limitação do sensor, não do modelo.
+3. **Seleção de época no conjunto de teste.** No `build.py`, o `EarlyStopping`
+   usa o próprio conjunto de teste para escolher a melhor época, o que torna a
+   acurácia otimista. O `tools/validacao_por_carga.py` **não** tem esse defeito:
+   valida num trecho separado das cargas de treino.
 4. **Faixa de amplitude.** O quantizador de entrada foi calibrado sobre o CWRU.
    Sinais fora da faixa de aproximadamente 0,1x a 2,0x a amplitude de treino são
    ceifados e produzem classificação sem significado. O firmware alerta nessa
    condição.
+5. **Diversidade de defeitos.** Foram usados apenas defeitos usinados por
+   eletroerosão na pista, em três diâmetros. Falhas reais evoluem de forma
+   progressiva e podem ter assinatura distinta.
 
-Mitigação disponível para o item 1: baixar mais arquivos do CWRU com
-`download_cwru.py` e reexecutar o `build.py`.
+### Volume de dados — resolvido
+
+O conjunto passou de 3 para **28 arquivos** (`download_cwru.py`), cobrindo 4
+níveis de carga e 3 diâmetros de defeito por classe de falha:
+
+| | Antes | Depois |
+|---|---|---|
+| Arquivos | 3 | 28 |
+| Sinal após decimação | 25,4 s | 279,4 s |
+| **Janelas independentes** | **49** | **545** |
+| Janelas de teste | 112 | 1.313 |
 
 ---
 
-## 7. Referência rápida dos comandos do console
+## 8. Referência rápida dos comandos do console
 
 | Tecla | Ação |
 |---|---|
@@ -373,7 +433,7 @@ Mitigação disponível para o item 1: baixar mais arquivos do CWRU com
 
 ---
 
-## 8. Arquivos do protocolo
+## 9. Arquivos do protocolo
 
 | Caminho | Papel |
 |---|---|
@@ -381,6 +441,8 @@ Mitigação disponível para o item 1: baixar mais arquivos do CWRU com
 | `src/pipeline/c_generator.py` | Gera `test_vectors.h` / `test_vectors.cpp` |
 | `arduino_deploy/.../src/main.cpp` | `runTestVectorSuite()` — o comando `t` |
 | `tools/sensibilidade_softmax.py` | Mede a sensibilidade da softmax a 1 LSB (§3.1) |
+| `tools/validacao_por_carga.py` | Validação deixando uma carga de fora (§6) |
+| `download_cwru.py` | Baixa os 28 arquivos do dataset |
 | `relatorios/relatorio_metricas.md` | Métricas do modelo no PC |
 | `docs/protocolo_validacao.md` | Este documento |
 

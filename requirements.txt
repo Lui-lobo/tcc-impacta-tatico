@@ -3,6 +3,7 @@ scipy
 tensorflow
 scikit-learn
 pytest
+requests
 
 matplotlib
 seaborn

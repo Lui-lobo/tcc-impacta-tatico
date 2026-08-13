@@ -11,8 +11,8 @@ constexpr int kNumClasses = 3;
 constexpr int kTrainingSampleRateHz = 1000;
 
 // Normalizacao estatistica aplicada no treino: (x - kNormMean) / kNormStd.
-constexpr float kNormMean = 0.0182875600f;
-constexpr float kNormStd = 0.0249428768f;
+constexpr float kNormMean = 0.0080134990f;
+constexpr float kNormStd = 0.0345664136f;
 
 // 'static' mantem uma copia por unidade de compilacao, evitando simbolos duplicados.
 static const char* const kClassLabels[kNumClasses] = {"0_normal", "1_inner_race", "2_outer_race"};
