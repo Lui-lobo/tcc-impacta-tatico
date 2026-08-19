@@ -2,6 +2,7 @@ import os
 import glob
 import numpy as np
 import tensorflow as tf
+from src.pipeline import dataset_curado
 from src.pipeline.data_processor import DataProcessor
 from src.pipeline.model_builder import TinyMLModelBuilder
 from src.pipeline.quantizer import (ModelQuantizer, quantize_input,
@@ -54,8 +55,76 @@ SEED = 42
 MAX_TEST_VECTORS = 128
 
 
+def descobrir_fontes(base_dir="data"):
+    """Lista os ensaios a treinar, preferindo o dataset curado quando existir.
+
+    Cada fonte e um dicionario com a serie JA na taxa em que sera usada e os
+    metadados necessarios para o relatorio. Unificar as duas origens aqui deixa
+    o resto do load_datasets() indiferente a qual delas esta em uso.
+
+    O dataset curado (data_curado/, produzido por
+    `python -m dataset_engineering.executar`) chega ja decimado, com o canal
+    correto selecionado e sem os ensaios cuja assinatura de defeito nao existe
+    no sinal. Sem ele, a leitura cai de volta nos .mat brutos de data/, que e o
+    comportamento historico do projeto.
+    """
+    processor = DataProcessor(window_size=WINDOW_SIZE, overlap=WINDOW_OVERLAP)
+
+    if dataset_curado.disponivel():
+        manifesto, ensaios = dataset_curado.carregar()
+        print(f"Fonte: {dataset_curado.resumo(manifesto, ensaios)}")
+        if manifesto["fs_hz"] != TARGET_SAMPLE_RATE_HZ:
+            raise ValueError(
+                f"O dataset curado esta a {manifesto['fs_hz']} Hz e o build.py "
+                f"espera {TARGET_SAMPLE_RATE_HZ} Hz. Regere a curadoria.")
+        fontes = [{
+            "rotulo": f"{e['pasta']}/{e['nome']}",
+            "classe": e["classe"],
+            "pasta": e["pasta"],
+            "taxa_origem": e["taxa_origem"],
+            "amostras_origem": None,   # a serie curada ja vem decimada
+            "serie": e["serie"],
+        } for e in ensaios]
+        descricao = (f"data_curado (v{manifesto['versao']}, "
+                     f"{manifesto['totais']['quarentena']} em quarentena)")
+        return fontes, dataset_curado.classes_presentes(ensaios), descricao
+
+    class_folders = sorted(
+        [f for f in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, f))]
+    )
+    print(f"Fonte: arquivos .mat brutos em '{base_dir}' {class_folders}")
+    print("       (rode 'python -m dataset_engineering.executar' para usar o "
+          "dataset curado)")
+
+    fontes, used_labels = [], []
+    for folder in class_folders:
+        try:
+            class_label = int(folder.split('_')[0])  # Extrai o '0' de '0_normal'
+        except ValueError:
+            continue
+
+        mat_files = sorted(glob.glob(os.path.join(base_dir, folder, "*.mat")))
+        if mat_files:
+            used_labels.append(folder)
+
+        for mat_file in mat_files:
+            file_name = os.path.basename(mat_file)
+            source_rate = SOURCE_RATE_BY_FILE.get(file_name, DEFAULT_SOURCE_RATE_HZ)
+            raw = processor.load_mat_file(mat_file)
+            fontes.append({
+                "rotulo": f"{folder}/{file_name}",
+                "classe": class_label,
+                "pasta": folder,
+                "taxa_origem": source_rate,
+                "amostras_origem": len(raw),
+                "serie": processor.resample_to(
+                    raw, source_rate, TARGET_SAMPLE_RATE_HZ),
+            })
+    return fontes, used_labels, f"{base_dir} (.mat brutos, sem curadoria)"
+
+
 def load_datasets(base_dir="data"):
-    """Carrega, decima para TARGET_SAMPLE_RATE_HZ e janela cada arquivo .mat.
+    """Carrega, decima para TARGET_SAMPLE_RATE_HZ e janela cada ensaio.
 
     Devolve treino e teste ja separados: a divisao e feita por trecho temporal
     dentro de cada arquivo, e nao por sorteio de janelas.
@@ -64,53 +133,36 @@ def load_datasets(base_dir="data"):
     X_train_list, y_train_list = [], []
     X_test_list, y_test_list = [], []
 
-    class_folders = sorted(
-        [f for f in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, f))]
-    )
-    print(f"Pastas estruturais encontradas em '{base_dir}': {class_folders}")
+    fontes, used_labels, descricao_fonte = descobrir_fontes(base_dir)
     print()
-    print(f"{'arquivo':<28}{'fs_orig':>9}{'amostras':>10}{'->':>4}"
+    print(f"{'ensaio':<28}{'fs_orig':>9}{'amostras':>10}{'->':>4}"
           f"{'fs_alvo':>9}{'amostras':>10}{'dur(s)':>9}{'jan_tr':>8}{'jan_te':>8}")
     print("-" * 95)
 
-    used_labels = []
     total_samples = 0
     total_files = 0
-    for folder in class_folders:
-        try:
-            class_label = int(folder.split('_')[0])  # Extrai o '0' de '0_normal'
-        except ValueError:
-            continue
+    for fonte in fontes:
+        decimated = fonte["serie"]
+        total_samples += len(decimated)
+        total_files += 1
 
-        folder_path = os.path.join(base_dir, folder)
-        mat_files = sorted(glob.glob(os.path.join(folder_path, "*.mat")))
-        if mat_files:
-            used_labels.append(folder)
+        train_part, test_part = processor.split_time_series(decimated, TEST_RATIO)
+        X_tr, y_tr = processor.create_windows(train_part, label=fonte["classe"])
+        X_te, y_te = processor.create_windows(test_part, label=fonte["classe"])
 
-        for mat_file in mat_files:
-            file_name = os.path.basename(mat_file)
-            source_rate = SOURCE_RATE_BY_FILE.get(file_name, DEFAULT_SOURCE_RATE_HZ)
+        origem = fonte["amostras_origem"]
+        print(f"{fonte['rotulo']:<28}{fonte['taxa_origem']:>9}"
+              f"{(origem if origem is not None else '-'):>10}{'->':>4}"
+              f"{TARGET_SAMPLE_RATE_HZ:>9}{len(decimated):>10}"
+              f"{len(decimated) / TARGET_SAMPLE_RATE_HZ:>9.1f}"
+              f"{len(X_tr):>8}{len(X_te):>8}")
 
-            raw = processor.load_mat_file(mat_file)
-            decimated = processor.resample_to(raw, source_rate, TARGET_SAMPLE_RATE_HZ)
-            total_samples += len(decimated)
-            total_files += 1
-
-            train_part, test_part = processor.split_time_series(decimated, TEST_RATIO)
-            X_tr, y_tr = processor.create_windows(train_part, label=class_label)
-            X_te, y_te = processor.create_windows(test_part, label=class_label)
-
-            print(f"{folder + '/' + file_name:<28}{source_rate:>9}{len(raw):>10}{'->':>4}"
-                  f"{TARGET_SAMPLE_RATE_HZ:>9}{len(decimated):>10}"
-                  f"{len(decimated) / TARGET_SAMPLE_RATE_HZ:>9.1f}"
-                  f"{len(X_tr):>8}{len(X_te):>8}")
-
-            if len(X_tr) > 0:
-                X_train_list.append(X_tr)
-                y_train_list.append(y_tr)
-            if len(X_te) > 0:
-                X_test_list.append(X_te)
-                y_test_list.append(y_te)
+        if len(X_tr) > 0:
+            X_train_list.append(X_tr)
+            y_train_list.append(y_tr)
+        if len(X_te) > 0:
+            X_test_list.append(X_te)
+            y_test_list.append(y_te)
 
     if not X_train_list or not X_test_list:
         raise ValueError(
@@ -138,6 +190,7 @@ def load_datasets(base_dir="data"):
         'taxa_hz': TARGET_SAMPLE_RATE_HZ,
         'janelas_independentes': independent,
         'overlap': WINDOW_OVERLAP,
+        'fonte': descricao_fonte,
     }
     return X_train, y_train, X_test, y_test, used_labels, info
 
@@ -342,9 +395,11 @@ def main():
           f"| Nyquist = {TARGET_SAMPLE_RATE_HZ // 2} Hz")
     print(f"      Normalizacao: media={mean:.8f} desvio={std:.8f}")
 
-    # Os arquivos tem duracoes diferentes (5 s no normal, 10 s nas falhas), o
-    # que desbalanceia as classes. O peso por classe evita que o modelo aprenda
-    # a favorecer a classe mais numerosa.
+    # As classes sao desbalanceadas por CONTAGEM DE ENSAIOS, nao por duracao:
+    # quase todos os arquivos tem ~10 s (a excecao e 97.mat, com 5 s), mas o
+    # CWRU so publica 4 ensaios de rolamento saudavel contra 12 por tipo de
+    # falha. O peso por classe evita que o modelo aprenda a favorecer a classe
+    # mais numerosa.
     class_weight = {
         i: float(len(y_train)) / (num_classes * max(1, train_counts[i]))
         for i in range(num_classes)

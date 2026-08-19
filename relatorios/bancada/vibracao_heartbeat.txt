@@ -1,0 +1,178 @@
+# Ensaio de bancada B2 - vibracao em padrao "heartbeat" de motor de celular
+# Fonte de excitacao: celular vibrando em padrao pulsado (dois pulsos curtos
+# seguidos de pausa), acoplado ao suporte do sensor. NAO ha rolamento.
+# A classe predita nao tem significado fisico.
+# Objetivo: verificar se a cadeia de aquisicao captura modulacao de amplitude.
+# Capturado do console serial do ESP32 (laco principal de inferencia).
+
+--- Janela #207 ---
+[AMOSTRA] fs_alvo=1000 Hz | fs_real=999.5 Hz | dur=511.3 ms | jitter_max=9 us | atrasos=0
+[SENSOR]  repetidas=0/512 (0.0%) | saturadas=0 | erros_i2c=0
+[EIXOS g] X med=-0.0172 dp=0.13366 pico=-0.4888/+0.3806
+          Y med=-0.0186 dp=0.02091 pico=-0.1304/+0.0559
+          Z med=+1.1552 dp=0.08397 pico=+0.9023/+1.4324
+[ENTRADA] eixo=Z | dc_removido=sim | dp=0.083974 g | dp_treino=0.034566 g | razao=2.429x
+[QUANT]   int8 min=-128 max=127 | niveis_distintos=113/256 | saturados=36
+[!!] Amplitude 2.4x a do treino: o modelo opera fora da faixa que conhece.
+[SAIDA]
+  0_normal       0.0000 (int8=-128)
+  1_inner_race   0.0000 (int8=-128)
+  2_outer_race   0.9961 (int8=127)
+=> 2_outer_race (99.6%) em 10094 us
+
+--- Janela #208 ---
+[AMOSTRA] fs_alvo=1000 Hz | fs_real=999.5 Hz | dur=511.3 ms | jitter_max=5 us | atrasos=0
+[SENSOR]  repetidas=0/512 (0.0%) | saturadas=0 | erros_i2c=0
+[EIXOS g] X med=-0.0157 dp=0.16840 pico=-0.3752/+0.2961
+          Y med=-0.0186 dp=0.02549 pico=-0.1047/+0.0444
+          Z med=+1.1562 dp=0.11104 pico=+0.9233/+1.4026
+[ENTRADA] eixo=Z | dc_removido=sim | dp=0.111036 g | dp_treino=0.034566 g | razao=3.212x
+[QUANT]   int8 min=-128 max=127 | niveis_distintos=144/256 | saturados=66
+[!!] Quantizador ceifou 66 de 512 amostras (13%). O sinal chega ACHATADO ao modelo - a classe predita nao tem valor.
+[!!] Amplitude 3.2x a do treino: o modelo opera fora da faixa que conhece.
+[SAIDA]
+  0_normal       0.0000 (int8=-128)
+  1_inner_race   0.0000 (int8=-128)
+  2_outer_race   0.9961 (int8=127)
+=> 2_outer_race (99.6%) em 9870 us
+
+--- Janela #209 ---
+[AMOSTRA] fs_alvo=1000 Hz | fs_real=999.5 Hz | dur=511.3 ms | jitter_max=9 us | atrasos=0
+[SENSOR]  repetidas=0/512 (0.0%) | saturadas=0 | erros_i2c=0
+[EIXOS g] X med=-0.0163 dp=0.20011 pico=-0.4705/+0.3665
+          Y med=-0.0186 dp=0.03112 pico=-0.1184/+0.0579
+          Z med=+1.1554 dp=0.13205 pico=+0.8796/+1.4292
+[ENTRADA] eixo=Z | dc_removido=sim | dp=0.132049 g | dp_treino=0.034566 g | razao=3.820x
+[QUANT]   int8 min=-128 max=127 | niveis_distintos=172/256 | saturados=97
+[!!] Quantizador ceifou 97 de 512 amostras (19%). O sinal chega ACHATADO ao modelo - a classe predita nao tem valor.
+[!!] Amplitude 3.8x a do treino: o modelo opera fora da faixa que conhece.
+[SAIDA]
+  0_normal       0.0000 (int8=-128)
+  1_inner_race   0.0000 (int8=-128)
+  2_outer_race   0.9961 (int8=127)
+=> 2_outer_race (99.6%) em 9875 us
+
+--- Janela #210 ---
+[AMOSTRA] fs_alvo=1000 Hz | fs_real=999.5 Hz | dur=511.3 ms | jitter_max=5 us | atrasos=0
+[SENSOR]  repetidas=0/512 (0.0%) | saturadas=0 | erros_i2c=0
+[EIXOS g] X med=-0.0162 dp=0.17325 pico=-0.4944/+0.3813
+          Y med=-0.0185 dp=0.02708 pico=-0.1313/+0.0564
+          Z med=+1.1559 dp=0.10969 pico=+0.8818/+1.4294
+[ENTRADA] eixo=Z | dc_removido=sim | dp=0.109694 g | dp_treino=0.034566 g | razao=3.173x
+[QUANT]   int8 min=-128 max=127 | niveis_distintos=154/256 | saturados=68
+[!!] Quantizador ceifou 68 de 512 amostras (13%). O sinal chega ACHATADO ao modelo - a classe predita nao tem valor.
+[!!] Amplitude 3.2x a do treino: o modelo opera fora da faixa que conhece.
+[SAIDA]
+  0_normal       0.0000 (int8=-128)
+  1_inner_race   0.0000 (int8=-128)
+  2_outer_race   0.9961 (int8=127)
+=> 2_outer_race (99.6%) em 9878 us
+
+--- Janela #211 ---
+[AMOSTRA] fs_alvo=1000 Hz | fs_real=999.5 Hz | dur=511.3 ms | jitter_max=9 us | atrasos=0
+[SENSOR]  repetidas=0/512 (0.0%) | saturadas=0 | erros_i2c=0
+[EIXOS g] X med=-0.0165 dp=0.13699 pico=-0.4683/+0.3992
+          Y med=-0.0183 dp=0.02135 pico=-0.1143/+0.0474
+          Z med=+1.1551 dp=0.07941 pico=+0.8877/+1.4189
+[ENTRADA] eixo=Z | dc_removido=sim | dp=0.079409 g | dp_treino=0.034566 g | razao=2.297x
+[QUANT]   int8 min=-128 max=127 | niveis_distintos=121/256 | saturados=29
+[!!] Amplitude 2.3x a do treino: o modelo opera fora da faixa que conhece.
+[SAIDA]
+  0_normal       0.0000 (int8=-128)
+  1_inner_race   0.0000 (int8=-128)
+  2_outer_race   0.9961 (int8=127)
+=> 2_outer_race (99.6%) em 9876 us
+
+--- Janela #212 ---
+[AMOSTRA] fs_alvo=1000 Hz | fs_real=999.5 Hz | dur=511.3 ms | jitter_max=5 us | atrasos=0
+[SENSOR]  repetidas=0/512 (0.0%) | saturadas=0 | erros_i2c=0
+[EIXOS g] X med=-0.0169 dp=0.15748 pico=-0.3633/+0.2971
+          Y med=-0.0184 dp=0.02408 pico=-0.1094/+0.0457
+          Z med=+1.1551 dp=0.10396 pico=+0.9238/+1.3911
+[ENTRADA] eixo=Z | dc_removido=sim | dp=0.103960 g | dp_treino=0.034566 g | razao=3.008x
+[QUANT]   int8 min=-128 max=127 | niveis_distintos=147/256 | saturados=51
+[!!] Amplitude 3.0x a do treino: o modelo opera fora da faixa que conhece.
+[SAIDA]
+  0_normal       0.0000 (int8=-128)
+  1_inner_race   0.0000 (int8=-128)
+  2_outer_race   0.9961 (int8=127)
+=> 2_outer_race (99.6%) em 9870 us
+
+--- Janela #213 ---
+[AMOSTRA] fs_alvo=1000 Hz | fs_real=999.5 Hz | dur=511.3 ms | jitter_max=9 us | atrasos=0
+[SENSOR]  repetidas=0/512 (0.0%) | saturadas=0 | erros_i2c=0
+[EIXOS g] X med=-0.0166 dp=0.19462 pico=-0.4485/+0.3547
+          Y med=-0.0185 dp=0.03051 pico=-0.1226/+0.0425
+          Z med=+1.1553 dp=0.12614 pico=+0.8992/+1.4458
+[ENTRADA] eixo=Z | dc_removido=sim | dp=0.126139 g | dp_treino=0.034566 g | razao=3.649x
+[QUANT]   int8 min=-128 max=127 | niveis_distintos=181/256 | saturados=75
+[!!] Quantizador ceifou 75 de 512 amostras (15%). O sinal chega ACHATADO ao modelo - a classe predita nao tem valor.
+[!!] Amplitude 3.6x a do treino: o modelo opera fora da faixa que conhece.
+[SAIDA]
+  0_normal       0.0000 (int8=-128)
+  1_inner_race   0.0000 (int8=-128)
+  2_outer_race   0.9961 (int8=127)
+=> 2_outer_race (99.6%) em 9873 us
+
+--- Janela #214 ---
+[AMOSTRA] fs_alvo=1000 Hz | fs_real=999.5 Hz | dur=511.3 ms | jitter_max=5 us | atrasos=0
+[SENSOR]  repetidas=0/512 (0.0%) | saturadas=0 | erros_i2c=0
+[EIXOS g] X med=-0.0160 dp=0.17716 pico=-0.4570/+0.3772
+          Y med=-0.0185 dp=0.02833 pico=-0.1311/+0.0469
+          Z med=+1.1556 dp=0.11142 pico=+0.8704/+1.4502
+[ENTRADA] eixo=Z | dc_removido=sim | dp=0.111423 g | dp_treino=0.034566 g | razao=3.223x
+[QUANT]   int8 min=-128 max=127 | niveis_distintos=156/256 | saturados=59
+[!!] Quantizador ceifou 59 de 512 amostras (12%). O sinal chega ACHATADO ao modelo - a classe predita nao tem valor.
+[!!] Amplitude 3.2x a do treino: o modelo opera fora da faixa que conhece.
+[SAIDA]
+  0_normal       0.0000 (int8=-128)
+  1_inner_race   0.0000 (int8=-128)
+  2_outer_race   0.9961 (int8=127)
+=> 2_outer_race (99.6%) em 9881 us
+
+--- Janela #215 ---
+[AMOSTRA] fs_alvo=1000 Hz | fs_real=999.5 Hz | dur=511.3 ms | jitter_max=9 us | atrasos=0
+[SENSOR]  repetidas=0/512 (0.0%) | saturadas=0 | erros_i2c=0
+[EIXOS g] X med=-0.0166 dp=0.13194 pico=-0.4958/+0.3889
+          Y med=-0.0183 dp=0.02088 pico=-0.1299/+0.0510
+          Z med=+1.1559 dp=0.08337 pico=+0.8772/+1.4243
+[ENTRADA] eixo=Z | dc_removido=sim | dp=0.083369 g | dp_treino=0.034566 g | razao=2.412x
+[QUANT]   int8 min=-128 max=127 | niveis_distintos=110/256 | saturados=37
+[!!] Amplitude 2.4x a do treino: o modelo opera fora da faixa que conhece.
+[SAIDA]
+  0_normal       0.0000 (int8=-128)
+  1_inner_race   0.0000 (int8=-128)
+  2_outer_race   0.9961 (int8=127)
+=> 2_outer_race (99.6%) em 9876 us
+
+--- Janela #216 ---
+[AMOSTRA] fs_alvo=1000 Hz | fs_real=999.5 Hz | dur=511.3 ms | jitter_max=5 us | atrasos=0
+[SENSOR]  repetidas=0/512 (0.0%) | saturadas=0 | erros_i2c=0
+[EIXOS g] X med=-0.0168 dp=0.18302 pico=-0.4832/+0.3706
+          Y med=-0.0187 dp=0.02937 pico=-0.1272/+0.0530
+          Z med=+1.1558 dp=0.11825 pico=+0.8755/+1.4419
+[ENTRADA] eixo=Z | dc_removido=sim | dp=0.118248 g | dp_treino=0.034566 g | razao=3.421x
+[QUANT]   int8 min=-128 max=127 | niveis_distintos=159/256 | saturados=68
+[!!] Quantizador ceifou 68 de 512 amostras (13%). O sinal chega ACHATADO ao modelo - a classe predita nao tem valor.
+[!!] Amplitude 3.4x a do treino: o modelo opera fora da faixa que conhece.
+[SAIDA]
+  0_normal       0.0000 (int8=-128)
+  1_inner_race   0.0000 (int8=-128)
+  2_outer_race   0.9961 (int8=127)
+=> 2_outer_race (99.6%) em 9870 us
+
+--- Janela #217 ---
+[AMOSTRA] fs_alvo=1000 Hz | fs_real=999.5 Hz | dur=511.3 ms | jitter_max=9 us | atrasos=0
+[SENSOR]  repetidas=0/512 (0.0%) | saturadas=0 | erros_i2c=0
+[EIXOS g] X med=-0.0161 dp=0.21179 pico=-0.4304/+0.3762
+          Y med=-0.0187 dp=0.03366 pico=-0.1252/+0.0479
+          Z med=+1.1545 dp=0.13202 pico=+0.8884/+1.4460
+[ENTRADA] eixo=Z | dc_removido=sim | dp=0.132023 g | dp_treino=0.034566 g | razao=3.819x
+[QUANT]   int8 min=-128 max=127 | niveis_distintos=194/256 | saturados=78
+[!!] Quantizador ceifou 78 de 512 amostras (15%). O sinal chega ACHATADO ao modelo - a classe predita nao tem valor.
+[!!] Amplitude 3.8x a do treino: o modelo opera fora da faixa que conhece.
+[SAIDA]
+  0_normal       0.0000 (int8=-128)
+  1_inner_race   0.0000 (int8=-128)
+  2_outer_race   0.9961 (int8=127)
+=> 2_outer_race (99.6%) em 9876 us

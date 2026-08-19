@@ -3,6 +3,11 @@
 # treino. Ver README.md.
 data/**/*.mat
 
+# Dataset curado pela etapa 3 do dataset_engineering. Derivado de data/ e
+# reprodutivel com `python -m dataset_engineering.executar`. O manifesto e
+# versionado (e pequeno e descreve as decisoes de curadoria); as series, nao.
+data_curado/**/*.npy
+
 # Python
 venv/
 __pycache__/

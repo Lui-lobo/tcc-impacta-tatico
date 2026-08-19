@@ -138,15 +138,24 @@ class ModelEvaluator:
             independentes = dataset_info.get('janelas_independentes', 0)
             parecer = ("✅ Amostra adequada." if independentes >= 300 else
                        "⚠️ Amostra pequena: trate a acurácia como indicativa.")
+            # A distribuição por classe do conjunto de teste identifica de forma
+            # inequívoca qual dataset gerou este relatório — e, por tabela, quais
+            # vetores de teste foram gravados no ESP32. Sem ela, uma captura do
+            # comando `t` feita com firmware desatualizado é indistinguível de
+            # uma feita com o firmware novo.
+            suporte = np.bincount(np.asarray(y_test, dtype=int),
+                                  minlength=len(cm)).tolist()
             dataset_section = f"""
 ## 1.1 Escala do Conjunto de Dados
 
 | Item | Valor |
 |---|---|
+| **Fonte dos dados** | **`{dataset_info.get('fonte', 'n/d')}`** |
 | Arquivos `.mat` do CWRU | {dataset_info.get('arquivos', 'n/d')} |
 | Sinal após decimação | {dataset_info.get('duracao_s', 0):.1f} s a {dataset_info.get('taxa_hz', 0)} Hz |
 | Janelas de treino | {dataset_info.get('janelas_treino', 'n/d')} |
 | Janelas de teste | {dataset_info.get('janelas_teste', 'n/d')} |
+| Janelas de teste por classe | {' / '.join(str(v) for v in suporte)} |
 | **Janelas independentes** (sem sobreposição) | **{independentes}** |
 
 {parecer} As janelas de treino e teste usam sobreposição de
