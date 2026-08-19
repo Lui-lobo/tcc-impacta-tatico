@@ -43,10 +43,12 @@ import numpy as np
 import tensorflow as tf
 
 import build as B
+from src.pipeline import dataset_curado
 from src.pipeline.data_processor import DataProcessor
 from src.pipeline.model_builder import TinyMLModelBuilder
 
-# arquivo -> carga em hp. Extraido do catalogo do download_cwru.py.
+# arquivo -> carga em hp. Usado apenas quando nao ha dataset curado: com ele, a
+# carga vem do manifesto, que e gerado do mesmo catalogo e nao pode divergir.
 CARGA_POR_ARQUIVO = {}
 for _carga, _arquivos in enumerate([
     ["97", "105", "169", "209", "130", "197", "234"],   # 0 hp, 1797 rpm
@@ -69,7 +71,22 @@ def carregar_series(base_dir="data"):
     Guarda as series inteiras em vez de janelas prontas: o janelamento depende
     de qual carga esta sendo testada, e refazer a decimacao a cada rodada
     custaria 4x mais tempo.
+
+    Prefere o dataset curado quando ele existe, para que este ensaio e o
+    build.py partam exatamente do mesmo sinal.
     """
+    if dataset_curado.disponivel():
+        manifesto, ensaios = dataset_curado.carregar()
+        print(dataset_curado.resumo(manifesto, ensaios))
+        series = {c: [] for c in RPM}
+        for e in ensaios:
+            series[e["carga"]].append((e["serie"], e["classe"]))
+        return series
+
+    print(f"[AVISO] data_curado/ nao existe; usando os .mat brutos de "
+          f"'{base_dir}'.")
+    print("        Rode 'python -m dataset_engineering.executar' para usar o "
+          "dataset curado.")
     proc = DataProcessor(window_size=B.WINDOW_SIZE, overlap=B.WINDOW_OVERLAP)
     series = {c: [] for c in RPM}
 

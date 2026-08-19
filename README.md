@@ -62,9 +62,16 @@ pip install -r requirements.txt
 # 2. Dataset (~102 MB, 28 arquivos .mat)
 python download_cwru.py
 
-# 3. Treino, quantização e geração dos artefatos C
+# 3. Curadoria do dataset (corrige leitura, exclui ensaios sem assinatura)
+python -m dataset_engineering.executar
+
+# 4. Treino, quantização e geração dos artefatos C
 python build.py
 ```
+
+O passo 3 é opcional: sem ele o `build.py` lê os `.mat` brutos, como sempre fez.
+Com ele, passa a ler `data_curado/` automaticamente — a primeira linha da saída
+informa qual fonte está em uso.
 
 Os arquivos `.mat` **não são versionados** — são dados públicos e o
 `download_cwru.py` baixa exatamente os 28 usados no treino: 4 níveis de carga
@@ -122,11 +129,17 @@ byte a byte idêntica à do PC. É o que separa "o modelo funciona no notebook" 
 ## Validações adicionais
 
 ```bash
+# Auditoria do dataset: inventário, integridade, espectro e assinatura do defeito
+python tools/analise_dataset.py
+
 # Generalização para uma condição de carga inédita (leave-one-load-out)
 python tools/validacao_por_carga.py
 
 # Sensibilidade da softmax int8 a 1 LSB nos logitos
 python tools/sensibilidade_softmax.py
+
+# Ensaios de bancada: analisa capturas do console serial do ESP32
+python tools/analise_bancada.py relatorios/bancada/*.txt
 
 # Testes do pipeline
 pytest tests/ -q
@@ -148,6 +161,8 @@ src/pipeline/
 tools/                        validações independentes
 tests/                        testes do pipeline
 arduino_deploy/tinyml_esp32/  projeto PlatformIO (firmware)
+dataset_engineering/          fluxo de curadoria do dataset (4 etapas)
+docs/dataset.md               auditoria do dataset e tratativas possíveis
 docs/protocolo_validacao.md   protocolo de validação e resultados medidos
 relatorios/                   relatório e gráficos gerados
 data/                         dataset (não versionado)
@@ -157,6 +172,21 @@ data/                         dataset (não versionado)
 
 ## Documentação
 
+- **[`docs/dataset.md`](docs/dataset.md)** — auditoria do dataset: o que existe
+  em `data/`, o que a decimação para 1 kHz descarta (98% da energia das falhas),
+  os defeitos encontrados no conjunto e as tratativas possíveis.
+- **[`dataset_engineering/README.md`](dataset_engineering/README.md)** — o fluxo
+  de engenharia de dados que aplica as tratativas, produz o dataset curado e
+  mede o efeito de cada correção.
+- **[`dataset_engineering/amostras/`](dataset_engineering/amostras/LEIA-ME.md)** —
+  o dataset em CSV, antes e depois das tratativas. O `.mat` do CWRU não abre em
+  planilha; estes arquivos existem para o dataset poder ser inspecionado.
+- **[`docs/comparativo_curadoria.md`](docs/comparativo_curadoria.md)** — o
+  resultado do sistema com e sem a curadoria, nos três níveis: separabilidade do
+  dado, CNN no PC e deploy no ESP32.
+- **[`docs/ensaios_bancada.md`](docs/ensaios_bancada.md)** — o que o sistema faz
+  fora da distribuição de treino: aquisição validada sob vibração real, piso de
+  ruído do sensor e a ausência de estado de rejeição no modelo.
 - **[`docs/pipeline.md`](docs/pipeline.md)** — como a pipeline funciona: o que
   cada uma das seis etapas faz, por que faz assim, e como o resultado chega ao
   ESP32. Comece por aqui para entender o código.

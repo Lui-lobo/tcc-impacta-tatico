@@ -1,0 +1,29 @@
+numero;arquivo_origem;classe;classe_nome;severidade;carga_hp;rpm_nominal;fs_origem_hz;fs_hz;amostras;duracao_s;canal_lido;corrigido_t1;envelope_ressonancia;status;motivo;arquivo_npy
+97;97.mat;0;normal;;0;1797;48000;1000;5083;5,083;X097_DE_time;nao;;incluido;;0_normal/097.npy
+98;98.mat;0;normal;;1;1772;48000;1000;10082;10,082;X098_DE_time;nao;;incluido;;0_normal/098.npy
+99;99.mat;0;normal;;2;1750;48000;1000;10106;10,106;X099_DE_time;sim;;incluido;;0_normal/099.npy
+100;100.mat;0;normal;;3;1730;48000;1000;10118;10,118;X100_DE_time;nao;;incluido;;0_normal/100.npy
+105;105.mat;1;pista interna;0,007 pol;0;1797;12000;1000;10106;10,106;X105_DE_time;nao;4551,0;incluido;;1_inner_race/105.npy
+106;106.mat;1;pista interna;0,007 pol;1;1772;12000;1000;10166;10,166;X106_DE_time;nao;5365,4;incluido;;1_inner_race/106.npy
+107;107.mat;1;pista interna;0,007 pol;2;1750;12000;1000;10178;10,178;X107_DE_time;nao;5632,7;incluido;;1_inner_race/107.npy
+108;108.mat;1;pista interna;0,007 pol;3;1730;12000;1000;10244;10,244;X108_DE_time;nao;3670,8;incluido;;1_inner_race/108.npy
+169;169.mat;1;pista interna;0,014 pol;0;1797;12000;1000;10154;10,154;X169_DE_time;nao;1264,2;incluido;;1_inner_race/169.npy
+170;170.mat;1;pista interna;0,014 pol;1;1772;12000;1000;10154;10,154;X170_DE_time;nao;643,0;incluido;;1_inner_race/170.npy
+171;171.mat;1;pista interna;0,014 pol;2;1750;12000;1000;10154;10,154;X171_DE_time;nao;608,2;incluido;;1_inner_race/171.npy
+172;172.mat;1;pista interna;0,014 pol;3;1730;12000;1000;10142;10,142;X172_DE_time;nao;513,1;incluido;;1_inner_race/172.npy
+209;209.mat;1;pista interna;0,021 pol;0;1797;12000;1000;10178;10,178;X209_DE_time;nao;2860,5;incluido;;1_inner_race/209.npy
+210;210.mat;1;pista interna;0,021 pol;1;1772;12000;1000;10130;10,130;X210_DE_time;nao;1815,1;incluido;;1_inner_race/210.npy
+211;211.mat;1;pista interna;0,021 pol;2;1750;12000;1000;10154;10,154;X211_DE_time;nao;1554,5;incluido;;1_inner_race/211.npy
+212;212.mat;1;pista interna;0,021 pol;3;1730;12000;1000;10166;10,166;X212_DE_time;nao;1138,0;incluido;;1_inner_race/212.npy
+130;130.mat;2;pista externa;0,007 pol;0;1797;12000;1000;10166;10,166;X130_DE_time;nao;41565,4;incluido;;2_outer_race/130.npy
+131;131.mat;2;pista externa;0,007 pol;1;1772;12000;1000;10203;10,203;X131_DE_time;nao;20980,0;incluido;;2_outer_race/131.npy
+132;132.mat;2;pista externa;0,007 pol;2;1750;12000;1000;10118;10,118;X132_DE_time;nao;18332,6;incluido;;2_outer_race/132.npy
+133;133.mat;2;pista externa;0,007 pol;3;1730;12000;1000;10215;10,215;X133_DE_time;nao;18879,2;incluido;;2_outer_race/133.npy
+197;197.mat;2;pista externa;0,014 pol;0;1797;12000;1000;10154;10,154;X197_DE_time;nao;5,6;quarentena;sem assinatura observavel;
+198;198.mat;2;pista externa;0,014 pol;1;1772;12000;1000;10178;10,178;X198_DE_time;nao;6,7;quarentena;sem assinatura observavel;
+199;199.mat;2;pista externa;0,014 pol;2;1750;12000;1000;10154;10,154;X199_DE_time;nao;6,8;quarentena;sem assinatura observavel;
+200;200.mat;2;pista externa;0,014 pol;3;1730;12000;1000;10166;10,166;X200_DE_time;nao;3,0;quarentena;sem assinatura observavel;
+234;234.mat;2;pista externa;0,021 pol;0;1797;12000;1000;10203;10,203;X234_DE_time;nao;1599,5;incluido;;2_outer_race/234.npy
+235;235.mat;2;pista externa;0,021 pol;1;1772;12000;1000;10166;10,166;X235_DE_time;nao;1586,5;incluido;;2_outer_race/235.npy
+236;236.mat;2;pista externa;0,021 pol;2;1750;12000;1000;10191;10,191;X236_DE_time;nao;1299,1;incluido;;2_outer_race/236.npy
+237;237.mat;2;pista externa;0,021 pol;3;1730;12000;1000;10166;10,166;X237_DE_time;nao;1097,4;incluido;;2_outer_race/237.npy
